@@ -1,0 +1,5 @@
+[System] Magnet System
+The Magnet System is the core component of an MRI machine, responsible for generating a stable and homogeneous magnetic field, which is essential for high-resolution MRI imaging. This system typically employs superconducting materials cooled to cryogenic temperatures to achieve the necessary field strength and stability.
+
+[Module] Magnet Coil Construction
+Set up a cleanroom environment for coil winding to avoid contamination. Wind the superconducting wire onto the coil formers with precision, implementing quality control checks at regular intervals during winding.

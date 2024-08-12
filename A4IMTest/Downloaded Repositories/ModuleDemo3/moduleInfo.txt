@@ -1,0 +1,5 @@
+[System] Gradient Coil System
+The Gradient Coil System provides spatial encoding in MRI, generating precise gradient magnetic fields in the X, Y, and Z directions. These fields are critical for slice selection, phase encoding, and frequency encoding during the imaging process.
+
+[Module] Gradient Coil Manufacturing
+Wind gradient coils with precise control over wire tension and spacing, using automated winding machines for consistency and accuracy. Perform intermediate testing to detect and correct any defects.
