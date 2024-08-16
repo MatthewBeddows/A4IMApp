@@ -1,15 +1,16 @@
-# system_view.py
+# module_view.py
 
 from PyQt5.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QTextEdit, 
-                             QPushButton, QLabel, QCheckBox,QInputDialog,QLineEdit)
+                             QPushButton, QLabel, QCheckBox, QLineEdit)
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont, QColor, QPalette
 from checkablelist_widget import CheckableListWidget
 
-class SystemView(QWidget):
+class ModuleView(QWidget):
     def __init__(self, parent):
         super().__init__()
         self.parent = parent
+        self.current_system = None
         self.setup_ui()
 
     def setup_ui(self):
@@ -23,16 +24,16 @@ class SystemView(QWidget):
         palette.setColor(QPalette.Window, QColor('white'))
         self.setPalette(palette)
 
-        # Left side (System List)
+        # Left side (Module List)
         left_layout = QVBoxLayout()
         
-        systems_label = QLabel("Systems")
-        systems_label.setFont(QFont('Arial', 16, QFont.Bold))
-        systems_label.setStyleSheet("color: #465775;")
-        left_layout.addWidget(systems_label)
+        modules_label = QLabel("Modules")
+        modules_label.setFont(QFont('Arial', 16, QFont.Bold))
+        modules_label.setStyleSheet("color: #465775;")
+        left_layout.addWidget(modules_label)
 
-        self.system_list = CheckableListWidget()
-        self.system_list.setStyleSheet("""
+        self.module_list = CheckableListWidget()
+        self.module_list.setStyleSheet("""
             QListWidget {
                 border: 1px solid #d9d9d9;
                 border-radius: 5px;
@@ -50,13 +51,13 @@ class SystemView(QWidget):
                 color: #465775;
             }
         """)
-        self.system_list.itemClicked.connect(self.show_system_details)
-        left_layout.addWidget(self.system_list)
+        self.module_list.itemClicked.connect(self.show_module_details)
+        left_layout.addWidget(self.module_list)
 
-        # Right side (System Details and Buttons)
+        # Right side (Module Details and Buttons)
         right_layout = QVBoxLayout()
 
-        details_label = QLabel("System Details")
+        details_label = QLabel("Module Details")
         details_label.setFont(QFont('Arial', 16, QFont.Bold))
         details_label.setStyleSheet("color: #465775;")
         right_layout.addWidget(details_label)
@@ -78,9 +79,9 @@ class SystemView(QWidget):
         assigned_layout.addStretch()
         right_layout.addLayout(assigned_layout)
 
-        self.system_details = QTextEdit()
-        self.system_details.setReadOnly(True)
-        self.system_details.setStyleSheet("""
+        self.module_details = QTextEdit()
+        self.module_details.setReadOnly(True)
+        self.module_details.setStyleSheet("""
             QTextEdit {
                 border: 1px solid #d9d9d9;
                 border-radius: 5px;
@@ -90,20 +91,19 @@ class SystemView(QWidget):
                 font-size: 14px;
             }
         """)
-        right_layout.addWidget(self.system_details)
+        right_layout.addWidget(self.module_details)
 
         construct_button = self.create_button("Construct")
-        construct_button.clicked.connect(self.construct_system)
+        construct_button.clicked.connect(self.construct_module)
         right_layout.addWidget(construct_button)
 
-        # Add the "View System BOM" button
-        view_bom_button = self.create_button("View System BOM")
-        view_bom_button.clicked.connect(self.view_system_bom)
+        # Add the new "View Module BOM" button
+        view_bom_button = self.create_button("View Module BOM")
+        view_bom_button.clicked.connect(self.view_module_bom)
         right_layout.addWidget(view_bom_button)
 
-
         back_button = self.create_button("Back")
-        back_button.clicked.connect(self.parent.show_main_menu)
+        back_button.clicked.connect(self.go_back)
         right_layout.addWidget(back_button)
 
         # Add layouts to main layout
@@ -111,6 +111,7 @@ class SystemView(QWidget):
         layout.addLayout(right_layout, 2)
 
         self.setLayout(layout)
+
 
     def create_button(self, text):
         button = QPushButton(text)
@@ -133,11 +134,12 @@ class SystemView(QWidget):
         """)
         return button
 
-    def populate_systems(self, systems):
-        self.system_list.clear()
-        for system_name in systems:
-            item = self.system_list.add_checkable_item(system_name)
-            widget = self.system_list.itemWidget(item)
+    def load_modules(self, system):
+        self.current_system = system
+        self.module_list.clear()
+        for module_name in self.parent.systems[system]['modules']:
+            item = self.module_list.add_checkable_item(module_name)
+            widget = self.module_list.itemWidget(item)
             checkbox = widget.findChild(QCheckBox)
             label = widget.findChild(QLabel)
             checkbox.setStyleSheet("QCheckBox { color: #465775; }")
@@ -145,11 +147,21 @@ class SystemView(QWidget):
             # Make the label expand to fill available space
             widget.layout().setStretchFactor(label, 1)
 
-    def show_system_details(self, item):
-        widget = self.system_list.itemWidget(item)
-        system_name = widget.findChild(QLabel).text()
-        system_info = self.parent.systems.get(system_name, {})
-        self.system_details.setText(system_info.get('description', ''))
+    def show_module_details(self, item):
+        widget = self.module_list.itemWidget(item)
+        module_name = widget.findChild(QLabel).text()
+        module_description = self.parent.systems[self.current_system]['modules'].get(module_name, '')
+        self.module_details.setText(module_description)
+
+    def construct_module(self):
+        current_item = self.module_list.currentItem()
+        if current_item:
+            widget = self.module_list.itemWidget(current_item)
+            module_name = widget.findChild(QLabel).text()
+            self.parent.show_git_building(self.current_system, module_name)
+
+    def go_back(self):
+        self.parent.show_system_view()
 
     def start_editing(self, event):
         self.assigned_value.hide()
@@ -168,16 +180,7 @@ class SystemView(QWidget):
         self.assigned_edit.hide()
         self.assigned_value.show()
 
-    def view_system_bom(self):
-        # Implement the functionality for viewing the system BOM here
-        print("View System BOM button clicked")
+    def view_module_bom(self):
+        # Implement the functionality for viewing the module BOM here
+        print("View Module BOM button clicked")
         # You can replace this with the actual implementation
-
-    def construct_system(self):
-        current_item = self.system_list.currentItem()
-        if current_item:
-            widget = self.system_list.itemWidget(current_item)
-            system_name = widget.findChild(QLabel).text()
-            self.parent.show_module_view(system_name)
-        else:
-            print("Please select a system")
