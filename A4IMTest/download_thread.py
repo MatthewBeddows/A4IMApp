@@ -1,27 +1,32 @@
-# download_thread.py
-
 import os
 import git
 from PyQt5.QtCore import QThread, pyqtSignal
 
 class DownloadThread(QThread):
     progress = pyqtSignal(int)
-    finished = pyqtSignal()
+    #finished = pyqtSignal()
 
-    def __init__(self, repos):
+    def __init__(self, repo_urls):
         super().__init__()
-        self.repos = repos
-
+        self.repo_urls = repo_urls
+    
     def run(self):
-        download_dir = "Downloaded Repositories"
-        if not os.path.exists(download_dir):
-            os.makedirs(download_dir)
-
-        for i, repo_url in enumerate(self.repos):
-            repo_name = repo_url.split('/')[-1]
-            repo_path = os.path.join(download_dir, repo_name)
-            if not os.path.exists(repo_path):
-                git.Repo.clone_from(f"https://github.com/{repo_url}.git", repo_path)
-            self.progress.emit((i + 1) * 100 // len(self.repos))
-
-        self.finished.emit()
+        print(f"Starting to download repositories: {self.repo_urls}")
+        for i, url in enumerate(self.repo_urls):
+            print(f"Processing repository URL: {url}")
+            repo_name = url.split('/')[-1]
+            local_path = os.path.join("Downloaded Repositories", repo_name)
+            
+            if os.path.exists(local_path):
+                print(f"Repository {repo_name} already exists. Updating...")
+                repo = git.Repo(local_path)
+                origin = repo.remotes.origin
+                origin.pull()
+            else:
+                print(f"Attempting to clone {url} to {local_path}")
+                git.Repo.clone_from(url, local_path)
+                print(f"Successfully cloned {url}")
+            
+            self.progress.emit(int((i + 1) / len(self.repo_urls) * 100))
+        
+        print("Download thread finished")
