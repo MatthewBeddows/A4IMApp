@@ -1,0 +1,4 @@
+[System] Power Supply
+The power supply unit (PSU) for the portable MRI scanner is designed to deliver high-performance power to the system while maintaining portability. Encased in a rugged yet lightweight aluminum alloy housing, the PSU is shockproof and waterproof, ensuring it can function in various environments. The unit is about the size of a small backpack, with a built-in handle for easy transport.
+[Module] Battery Pack
+This module contains the high-capacity lithium-ion cells, encased in a heat-resistant housing with shock absorbers to protect the battery from impact. The battery pack connects to the scanner via a quick-release docking station, allowing for easy removal and replacement.

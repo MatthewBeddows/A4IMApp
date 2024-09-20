@@ -616,19 +616,44 @@ class SystemView(QWidget):
         else:
             print("No module selected")
 
-    # Construct system or module
+    # Modify the construct_system method
     def construct_system(self):
         if self.selected_node:
             name = self.selected_node.name
-            data = self.selected_node.data
             if self.selected_node.node_type == 'module':
-                print(f"Constructing module: {name}")
-                # Implement logic to construct module
+                # Open the construct URL for the module
+                url = "https://matthewbeddows.github.io/A4IM-ProjectArchitect/GitBuilding/testpage1.html"
+                self.parent.show_git_building(system=None, module=name, url=url)
             else:
-                print(f"Constructing system: {name}")
-                # Implement logic to construct system
+                print("Please select a module to construct.")
         else:
             print("Please select a node")
+
+        # Modify the view_system_bom method
+    def view_system_bom(self):
+        if self.selected_node:
+            name = self.selected_node.name
+            if self.selected_node.node_type == 'system':
+                # Open the system BOM URL
+                url = "https://matthewbeddows.github.io/A4IM-ProjectArchitect/GitBuilding/index_BOM.html"
+                self.parent.show_git_building(system=name, module=None, url=url)
+            else:
+                print("Please select a system to view its BOM.")
+        else:
+            print("No system selected")
+
+    # Modify the view_module_bom method
+    def view_module_bom(self):
+        if self.selected_node:
+            name = self.selected_node.name
+            if self.selected_node.node_type == 'module':
+                # Open the module BOM URL
+                url = "https://matthewbeddows.github.io/A4IM-ProjectArchitect/GitBuilding/index_BOM.html"
+                self.parent.show_git_building(system=None, module=name, url=url)
+            else:
+                print("Please select a module to view its BOM.")
+        else:
+            print("No module selected")
 
     # Recenter the graphics view
     def recenter_view(self):

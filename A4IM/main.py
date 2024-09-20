@@ -74,8 +74,8 @@ class GitFileReaderApp(QMainWindow):
         self.module_view.load_modules(system)
         self.central_widget.setCurrentWidget(self.module_view)
 
-    def show_git_building(self, system, module):
-        self.git_building.load_module(system, module)
+    def show_git_building(self, system, module, url):
+        self.git_building.load_url(url)
         self.central_widget.setCurrentWidget(self.git_building)
 
     def download_project_architect(self):

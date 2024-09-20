@@ -1,0 +1,4 @@
+[System] Power Supply
+The power supply unit (PSU) for the portable MRI scanner is designed to deliver high-performance power to the system while maintaining portability. Encased in a rugged yet lightweight aluminum alloy housing, the PSU is shockproof and waterproof, ensuring it can function in various environments. The unit is about the size of a small backpack, with a built-in handle for easy transport.
+[Module] AC/DC Converter
+Converts power from a standard wall outlet (AC) to the required DC power for the MRI scanner. This module is compact and connects to the PSU via a secure locking cable. It also contains cooling fans and heat sinks to ensure the unit remains at an optimal operating temperature.
