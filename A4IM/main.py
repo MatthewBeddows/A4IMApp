@@ -21,6 +21,7 @@ from gitbuilding_setup import GitBuildingSetup
 
 
 
+
 class GitFileReaderApp(QMainWindow):
     def __init__(self):
         super().__init__()
