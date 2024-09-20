@@ -207,7 +207,7 @@ class GitFileReaderApp(QMainWindow):
                 pass
         
         self.parse_module_info(system_name)
-        QMessageBox.information(self, "Download Complete", f"Modules for system '{system_name}' have been downloaded and parsed successfully.")
+        #QMessageBox.information(self, "Download Complete", f"Modules for system '{system_name}' have been downloaded and parsed successfully.")
 
     def process_downloaded_modules(self):
         for system_name in self.system_order:
