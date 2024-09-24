@@ -79,6 +79,19 @@ class GitFileReaderApp(QMainWindow):
         self.central_widget.setCurrentWidget(self.git_building)
 
     def download_project_architect(self):
+
+        # Define the target folder where the repository will be cloned
+        download_dir = os.path.join(os.getcwd(), "Downloaded Repositories")
+        clone_folder = os.path.join(download_dir, "ArchitectRepository")
+
+        # Ensure the "Downloaded Repositories" directory exists
+        if not os.path.exists(download_dir):
+            os.makedirs(download_dir)
+
+        # Check if the Architect repository folder already exists
+        if not os.path.exists(clone_folder):
+            os.makedirs(clone_folder)
+
         url = "https://github.com/MatthewBeddows/A4IM-ProjectArchitect/raw/main/architect.txt"
         response = requests.get(url)
         if response.status_code == 200:
@@ -251,3 +264,5 @@ if __name__ == "__main__":
     window = GitFileReaderApp()
     window.show()
     sys.exit(app.exec_())
+
+

@@ -1,17 +1,21 @@
 from PyQt5.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QTextEdit, QPushButton, QLabel, QLineEdit, QCheckBox,
     QGraphicsView, QGraphicsScene, QGraphicsRectItem, QGraphicsTextItem,
-    QGraphicsLineItem, QGraphicsItem
+    QGraphicsLineItem, QGraphicsItem, QGraphicsPixmapItem
 )
 from PyQt5.QtCore import Qt, QPointF, QRectF, QLineF
-from PyQt5.QtGui import QFont, QColor, QPen, QBrush, QPainter
+from PyQt5.QtGui import QFont, QColor, QPen, QBrush, QPainter, QPixmap
 import math
+import os
 
 # NodeItem class for systems and modules
 class NodeItem(QGraphicsRectItem):
     def __init__(self, name, data, system_view, node_type='module'):
         # Adjust size based on node type
-        if node_type == 'system':
+        if node_type == 'project':
+            width = 220
+            height = 100
+        elif node_type == 'system':
             width = 180
             height = 80
         else:
@@ -22,14 +26,16 @@ class NodeItem(QGraphicsRectItem):
         self.name = name
         self.data = data
         self.system_view = system_view
-        self.node_type = node_type  # 'system' or 'module'
+        self.node_type = node_type  # 'project', 'system', or 'module'
         self.completed = False  # Completion status
         self.parent_node = None  # Parent node
         self.child_nodes = []  # List of child nodes
         self.connected_lines = []  # List to store lines connected to this node
 
         # Set colors based on node type
-        if node_type == 'system':
+        if node_type == 'project':
+            self.setBrush(QBrush(QColor("#2E4A62")))  # Darker blue color for project node
+        elif node_type == 'system':
             self.setBrush(QBrush(QColor("#465775")))  # Blue color for systems
         else:
             self.setBrush(QBrush(QColor("#A9A9A9")))  # Grey color for modules
@@ -42,7 +48,9 @@ class NodeItem(QGraphicsRectItem):
         text = QGraphicsTextItem(self)
         text.setDefaultTextColor(Qt.white)
         # Adjust font based on node type
-        if node_type == 'system':
+        if node_type == 'project':
+            font = QFont('Arial', 14)  # Larger font size for project node
+        elif node_type == 'system':
             font = QFont('Arial', 12)  # Increased font size for system nodes
         else:
             font = QFont('Arial', 10)
@@ -57,14 +65,26 @@ class NodeItem(QGraphicsRectItem):
         text_y = -text_rect.height() / 2
         text.setPos(text_x, text_y)
 
-        # Create status indicator at top right corner
-        indicator_size = 20
-        indicator_x = width / 2 - indicator_size - 2
-        indicator_y = -height / 2 + 2
-        self.status_indicator = QGraphicsRectItem(0, 0, indicator_size, indicator_size, self)
-        self.status_indicator.setBrush(QBrush(QColor("#D9534F")))
-        self.status_indicator.setPen(QPen(Qt.black))
-        self.status_indicator.setPos(indicator_x, indicator_y)
+        # Create status indicator at top right corner (not for project node)
+        if node_type != 'project':
+            indicator_size = 20
+            indicator_x = width / 2 - indicator_size - 2
+            indicator_y = -height / 2 + 2
+            self.status_indicator = QGraphicsRectItem(0, 0, indicator_size, indicator_size, self)
+            self.status_indicator.setBrush(QBrush(QColor("#D9534F")))
+            self.status_indicator.setPen(QPen(Qt.black))
+            self.status_indicator.setPos(indicator_x, indicator_y)
+
+        # # Add logo to project node
+        # if node_type == 'project':
+        #     logo_path = os.path.join('docs','images','A4IMLogo_pink.png')  
+        #     if os.path.exists(logo_path):
+        #         pixmap = QPixmap(logo_path)
+        #         scaled_pixmap = pixmap.scaled(50, 50, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        #         logo_item = QGraphicsPixmapItem(scaled_pixmap, self)
+        #         logo_item.setPos(-scaled_pixmap.width()/2, -height/2 + 10)  # Position at the top center
+        #     else:
+        #         print("Logo image not found at:", logo_path)
 
     # Handle mouse press event
     def mousePressEvent(self, event):
@@ -90,7 +110,8 @@ class NodeItem(QGraphicsRectItem):
 
     # Update node color based on completion status
     def update_node_color(self):
-        self.update_status_indicator()
+        if self.node_type != 'project':
+            self.update_status_indicator()
 
     # Check if any child modules are completed
     def has_completed_modules(self):
@@ -118,6 +139,9 @@ class ZoomableGraphicsView(QGraphicsView):
         self.min_scale = 0.1
         self.max_scale = 10.0
         self.setDragMode(QGraphicsView.ScrollHandDrag)
+        #for mouse location zoom
+        self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
+
 
     # Override wheel event to implement zooming
     def wheelEvent(self, event):
@@ -155,6 +179,7 @@ class SystemView(QWidget):
     def __init__(self, parent):
         super().__init__()
         self.parent = parent
+        self.project_node_x = -400  # Adjust this value as needed
         self.node_items = {}
         self.selected_node = None
         self.toggle_mode = False  # Toggle mode flag
@@ -364,8 +389,17 @@ class SystemView(QWidget):
         else:
             self.update_node_visibility()
 
-        # Adjust scene rectangle
-        self.graphics_scene.setSceneRect(self.graphics_scene.itemsBoundingRect())
+       # Adjust scene rectangle with extra space
+        items_rect = self.graphics_scene.itemsBoundingRect()
+        extra_left = 200   # Adjust as needed
+        extra_right = 500  # Adjust as needed
+        extra_top = 200   # Adjust as needed
+        extra_bottom = 200  # Adjust as needed
+        items_rect.setLeft(items_rect.left() - extra_left)
+        items_rect.setRight(items_rect.right() + extra_right)
+        items_rect.setTop(items_rect.top() - extra_top)
+        items_rect.setBottom(items_rect.bottom() + extra_bottom)
+        self.graphics_scene.setSceneRect(items_rect)
 
     # Initialize all nodes without clearing them later
     def initialize_nodes(self):
@@ -395,13 +429,19 @@ class SystemView(QWidget):
             })
             y += total_height + system_spacing
 
+        # Create the Project Node
+        project_node_height = y
+        project_position = QPointF(self.project_node_x, project_node_height / 2)
+        self.project_node = self.add_node("A4IM Scanner", None, project_position, None, node_type='project')
+        self.all_nodes.append(self.project_node)
+
         # Second pass: Position the systems and their modules
         for system_info in self.system_positions:
             system_name = system_info['name']
             system_data = system_info['data']
             system_y = system_info['y'] + system_info['total_height'] / 2
             position = QPointF(0, system_y)
-            system_item = self.add_node(system_name, system_data, position, None, node_type='system')
+            system_item = self.add_node(system_name, system_data, position, self.project_node, node_type='system')
             self.system_nodes[system_name] = system_item
             self.system_items.append(system_item)
             self.all_nodes.append(system_item)
@@ -424,14 +464,6 @@ class SystemView(QWidget):
                     self.all_nodes.append(module_item)
                     index += 1
 
-        # Add lines connecting systems vertically
-        self.system_lines = []
-        for i in range(len(self.system_items) - 1):
-            line = QGraphicsLineItem(QLineF(self.system_items[i].pos(), self.system_items[i + 1].pos()))
-            line.setPen(QPen(QColor("#000000"), 2, Qt.DashLine))
-            line.setZValue(0)
-            self.graphics_scene.addItem(line)
-            self.system_lines.append(line)
 
     # Update node visibility without clearing the scene
     def update_node_visibility(self):
@@ -487,15 +519,38 @@ class SystemView(QWidget):
                     for line in module_item.connected_lines:
                         line.setVisible(False)
 
-        # Update system lines positions
-        for i in range(len(self.system_items) - 1):
-            line = self.system_lines[i]
-            line.setLine(QLineF(self.system_items[i].pos(), self.system_items[i + 1].pos()))
+        # Update project node position
+        total_project_height = y
+        project_node_x = self.project_node_x  # Use the same x-coordinate as in initialize_nodes()
+        self.project_node.setPos(QPointF(project_node_x, total_project_height / 2))
 
-        # Adjust scene rectangle
-        self.graphics_scene.setSceneRect(self.graphics_scene.itemsBoundingRect())
+        # Update lines connecting project node to systems
+        for system_item in self.system_items:
+            for line in system_item.connected_lines:
+                if line in self.project_node.connected_lines:
+                    line.setLine(QLineF(self.project_node.pos(), system_item.pos()))
 
-    # Add a node (system or module)
+        
+
+        # Update lines connecting project node to systems
+        for system_item in self.system_items:
+            for line in system_item.connected_lines:
+                if line in self.project_node.connected_lines:
+                    line.setLine(QLineF(self.project_node.pos(), system_item.pos()))
+
+        # Adjust scene rectangle with extra space
+        items_rect = self.graphics_scene.itemsBoundingRect()
+        extra_left = 200   # Adjust as needed
+        extra_right = 500  # Adjust as needed
+        extra_top = 200   # Adjust as needed
+        extra_bottom = 200  # Adjust as needed
+        items_rect.setLeft(items_rect.left() - extra_left)
+        items_rect.setRight(items_rect.right() + extra_right)
+        items_rect.setTop(items_rect.top() - extra_top)
+        items_rect.setBottom(items_rect.bottom() + extra_bottom)
+        self.graphics_scene.setSceneRect(items_rect)
+
+    # Add a node (project, system, or module)
     def add_node(self, name, data, position, parent_node, node_type='module'):
         node = NodeItem(name, data, self, node_type=node_type)
         node.setPos(position)
@@ -527,7 +582,7 @@ class SystemView(QWidget):
             description = data.get('description', 'No details available.')
             assigned = data.get('assigned_to', 'None')
         else:
-            description = str(data)
+            description = str(data) if data else 'No details available.'
             assigned = 'None'
 
         self.system_details.setText(f"{name}\n\n{description}")
@@ -558,10 +613,15 @@ class SystemView(QWidget):
             # Hide the Construct button
             self.construct_button.hide()
 
-            # Change View BOM button text to "View System BOM"
-            self.view_bom_button.setText("View System BOM")
-            self.view_bom_button.clicked.disconnect()
-            self.view_bom_button.clicked.connect(self.view_system_bom)
+            # Change View BOM button text to "View System BOM" or hide if project node
+            if node.node_type == 'system':
+                self.view_bom_button.setText("View System BOM")
+                self.view_bom_button.clicked.disconnect()
+                self.view_bom_button.clicked.connect(self.view_system_bom)
+            else:
+                self.view_bom_button.setText("View Project Info")
+                self.view_bom_button.clicked.disconnect()
+                self.view_bom_button.clicked.connect(self.view_project_info)
 
         # If in toggle mode and a system node is clicked, update the display
         if self.toggle_mode and node.node_type == 'system':
@@ -603,35 +663,6 @@ class SystemView(QWidget):
     # View system BOM
     def view_system_bom(self):
         if self.selected_node:
-            print(f"Viewing BOM for system: {self.selected_node.name}")
-            # Implement logic to view system BOM
-        else:
-            print("No system selected")
-
-    # View module BOM
-    def view_module_bom(self):
-        if self.selected_node:
-            print(f"Viewing BOM for module: {self.selected_node.name}")
-            # Implement logic to view module BOM
-        else:
-            print("No module selected")
-
-    # Modify the construct_system method
-    def construct_system(self):
-        if self.selected_node:
-            name = self.selected_node.name
-            if self.selected_node.node_type == 'module':
-                # Open the construct URL for the module
-                url = "https://matthewbeddows.github.io/A4IM-ProjectArchitect/GitBuilding/testpage1.html"
-                self.parent.show_git_building(system=None, module=name, url=url)
-            else:
-                print("Please select a module to construct.")
-        else:
-            print("Please select a node")
-
-        # Modify the view_system_bom method
-    def view_system_bom(self):
-        if self.selected_node:
             name = self.selected_node.name
             if self.selected_node.node_type == 'system':
                 # Open the system BOM URL
@@ -642,7 +673,7 @@ class SystemView(QWidget):
         else:
             print("No system selected")
 
-    # Modify the view_module_bom method
+    # View module BOM
     def view_module_bom(self):
         if self.selected_node:
             name = self.selected_node.name
@@ -654,6 +685,33 @@ class SystemView(QWidget):
                 print("Please select a module to view its BOM.")
         else:
             print("No module selected")
+
+    # View project info
+    def view_project_info(self):
+        if self.selected_node:
+            name = self.selected_node.name
+            if self.selected_node.node_type == 'project':
+                # Open the project info URL or display project information
+                # For now, we'll just print a message
+                print(f"Viewing project info for: {name}")
+                # Implement logic to view project info if needed
+            else:
+                print("Please select the project node to view its info.")
+        else:
+            print("No project selected")
+
+    # Construct system or module
+    def construct_system(self):
+        if self.selected_node:
+            name = self.selected_node.name
+            if self.selected_node.node_type == 'module':
+                # Open the construct URL for the module
+                url = "https://matthewbeddows.github.io/A4IM-ProjectArchitect/GitBuilding/testpage1.html"
+                self.parent.show_git_building(system=None, module=name, url=url)
+            else:
+                print("Please select a module to construct.")
+        else:
+            print("Please select a node")
 
     # Recenter the graphics view
     def recenter_view(self):
