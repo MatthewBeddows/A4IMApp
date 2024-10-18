@@ -7,26 +7,22 @@ from PyQt5.QtCore import Qt, QPointF, QRectF, QLineF
 from PyQt5.QtGui import QFont, QColor, QPen, QBrush, QPainter, QPixmap
 import math
 import os
+import re  # For regex operations to strip text in square brackets
 
-# NodeItem class for systems and modules
+# NodeItem class for modules
 class NodeItem(QGraphicsRectItem):
     def __init__(self, name, data, system_view, node_type='module'):
-        # Adjust size based on node type
-        if node_type == 'project':
-            width = 220
-            height = 100
-        elif node_type == 'system':
-            width = 180
-            height = 80
-        else:
-            width = 150
-            height = 60
+        # Adjust size based on node depth (more nested modules will be smaller)
+        depth = data.get('depth', 0)
+        width = max(150 - depth * 10, 80)  # Minimum width of 80
+        height = max(80 - depth * 5, 50)   # Minimum height of 50
 
-        super().__init__(-width/2, -height/2, width, height)  # Initialize rectangle centered
+        # Initialize the rectangle centered at (0,0)
+        super().__init__(-width/2, -height/2, width, height)
         self.name = name
         self.data = data
         self.system_view = system_view
-        self.node_type = node_type  # 'project', 'system', or 'module'
+        self.node_type = node_type  # 'project' or 'module'
         self.completed = False  # Completion status
         self.parent_node = None  # Parent node
         self.child_nodes = []  # List of child nodes
@@ -35,10 +31,8 @@ class NodeItem(QGraphicsRectItem):
         # Set colors based on node type
         if node_type == 'project':
             self.setBrush(QBrush(QColor("#2E4A62")))  # Darker blue color for project node
-        elif node_type == 'system':
-            self.setBrush(QBrush(QColor("#465775")))  # Blue color for systems
         else:
-            self.setBrush(QBrush(QColor("#A9A9A9")))  # Grey color for modules
+            self.setBrush(QBrush(QColor("#465775")))  # Blue color for modules
 
         self.setPen(QPen(Qt.NoPen))  # No border around node
         self.setFlags(QGraphicsItem.ItemIsSelectable | QGraphicsItem.ItemIsFocusable)
@@ -47,16 +41,14 @@ class NodeItem(QGraphicsRectItem):
         # Create text label for the node
         text = QGraphicsTextItem(self)
         text.setDefaultTextColor(Qt.white)
-        # Adjust font based on node type
-        if node_type == 'project':
-            font = QFont('Arial', 14)  # Larger font size for project node
-        elif node_type == 'system':
-            font = QFont('Arial', 12)  # Increased font size for system nodes
-        else:
-            font = QFont('Arial', 10)
+        # Adjust font based on node depth
+        font_size = max(12 - depth, 8)  # Decrease font size with depth
+        font = QFont('Arial', font_size)
         font.setBold(True)  # Bold text
         text.setFont(font)
-        text.setPlainText(name)
+        # Strip text in square brackets from name
+        display_name = re.sub(r'\[.*?\]', '', name).strip()
+        text.setPlainText(display_name)
         text.setTextWidth(width - 10)
 
         # Center the text within the node
@@ -67,46 +59,29 @@ class NodeItem(QGraphicsRectItem):
 
         # Create status indicator at top right corner (not for project node)
         if node_type != 'project':
-            indicator_size = 20
+            indicator_size = 15
             indicator_x = width / 2 - indicator_size - 2
             indicator_y = -height / 2 + 2
             self.status_indicator = QGraphicsRectItem(0, 0, indicator_size, indicator_size, self)
-            self.status_indicator.setBrush(QBrush(QColor("#D9534F")))
+            self.status_indicator.setBrush(QBrush(QColor("#D9534F")))  # Red color for incomplete
             self.status_indicator.setPen(QPen(Qt.black))
             self.status_indicator.setPos(indicator_x, indicator_y)
-
-        # # Add logo to project node
-        # if node_type == 'project':
-        #     logo_path = os.path.join('docs','images','A4IMLogo_pink.png')  
-        #     if os.path.exists(logo_path):
-        #         pixmap = QPixmap(logo_path)
-        #         scaled_pixmap = pixmap.scaled(50, 50, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        #         logo_item = QGraphicsPixmapItem(scaled_pixmap, self)
-        #         logo_item.setPos(-scaled_pixmap.width()/2, -height/2 + 10)  # Position at the top center
-        #     else:
-        #         print("Logo image not found at:", logo_path)
 
     # Handle mouse press event
     def mousePressEvent(self, event):
         self.scene().clearSelection()
         self.setSelected(True)
         self.system_view.node_clicked(self)
-        # Removed super().mousePressEvent(event) to prevent issues
+        # Prevent default behavior
 
     # Update the status indicator color
     def update_status_indicator(self):
-        if self.node_type == 'module':
-            if self.completed:
-                self.status_indicator.setBrush(QBrush(QColor("#32CD32")))  # Lime green
-            else:
-                self.status_indicator.setBrush(QBrush(QColor("#D9534F")))  # Red
-        elif self.node_type == 'system':
-            if self.all_modules_completed():
-                self.status_indicator.setBrush(QBrush(QColor("#32CD32")))  # Lime green
-            elif self.has_completed_modules():
-                self.status_indicator.setBrush(QBrush(QColor("#F0AD4E")))  # Yellow
-            else:
-                self.status_indicator.setBrush(QBrush(QColor("#D9534F")))  # Red
+        if self.completed:
+            self.status_indicator.setBrush(QBrush(QColor("#32CD32")))  # Lime green
+        elif self.has_completed_children():
+            self.status_indicator.setBrush(QBrush(QColor("#F0AD4E")))  # Yellow
+        else:
+            self.status_indicator.setBrush(QBrush(QColor("#D9534F")))  # Red
 
     # Update node color based on completion status
     def update_node_color(self):
@@ -114,22 +89,17 @@ class NodeItem(QGraphicsRectItem):
             self.update_status_indicator()
 
     # Check if any child modules are completed
-    def has_completed_modules(self):
+    def has_completed_children(self):
         for child in self.child_nodes:
-            if child.node_type == 'module' and child.completed:
-                return True
-            elif child.node_type == 'system' and child.has_completed_modules():
+            if child.completed or child.has_completed_children():
                 return True
         return False
 
     # Check if all child modules are completed
-    def all_modules_completed(self):
-        for child in self.child_nodes:
-            if child.node_type == 'module' and not child.completed:
-                return False
-            elif child.node_type == 'system' and not child.all_modules_completed():
-                return False
-        return True
+    def all_children_completed(self):
+        if not self.child_nodes:
+            return self.completed
+        return all(child.all_children_completed() for child in self.child_nodes)
 
 # Custom GraphicsView class with zoom functionality
 class ZoomableGraphicsView(QGraphicsView):
@@ -139,9 +109,8 @@ class ZoomableGraphicsView(QGraphicsView):
         self.min_scale = 0.1
         self.max_scale = 10.0
         self.setDragMode(QGraphicsView.ScrollHandDrag)
-        #for mouse location zoom
+        # For mouse location zoom
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
-
 
     # Override wheel event to implement zooming
     def wheelEvent(self, event):
@@ -183,7 +152,7 @@ class SystemView(QWidget):
         self.node_items = {}
         self.selected_node = None
         self.toggle_mode = False  # Toggle mode flag
-        self.systems_data = {}  # Store systems data
+        self.modules_data = {}  # Store modules data
         self.setup_ui()
 
     # Set up the user interface
@@ -207,11 +176,11 @@ class SystemView(QWidget):
         graphics_layout.setContentsMargins(0, 0, 0, 0)
         graphics_container.setLayout(graphics_layout)
 
-        # Label for systems graph
-        systems_label = QLabel("Systems Graph")
-        systems_label.setFont(QFont('Arial', 16, QFont.Bold))
-        systems_label.setStyleSheet("color: #465775;")
-        graphics_layout.addWidget(systems_label)
+        # Label for modules graph
+        modules_label = QLabel("Modules Graph")
+        modules_label.setFont(QFont('Arial', 16, QFont.Bold))
+        modules_label.setStyleSheet("color: #465775;")
+        graphics_layout.addWidget(modules_label)
 
         # Create custom graphics view with zoom functionality
         self.graphics_view = ZoomableGraphicsView()
@@ -275,7 +244,7 @@ class SystemView(QWidget):
             }
         """)
         self.toggle_button.clicked.connect(self.toggle_modules)
-        self.toggle_button.setToolTip("Toggle visibility of modules")
+        self.toggle_button.setToolTip("Toggle visibility of child modules")
         self.toggle_button.setFixedSize(100, 30)
         button_layout.addWidget(self.toggle_button)
 
@@ -283,11 +252,11 @@ class SystemView(QWidget):
 
         left_layout.addWidget(graphics_container)
 
-        # Right layout for system details and buttons
+        # Right layout for module details and buttons
         right_layout = QVBoxLayout()
 
-        # Label for system details
-        details_label = QLabel("System Details")
+        # Label for module details
+        details_label = QLabel("Module Details")
         details_label.setFont(QFont('Arial', 16, QFont.Bold))
         details_label.setStyleSheet("color: #465775;")
         right_layout.addWidget(details_label)
@@ -315,10 +284,10 @@ class SystemView(QWidget):
         self.completion_checkbox.hide()
         right_layout.addWidget(self.completion_checkbox)
 
-        # Text edit for system details
-        self.system_details = QTextEdit()
-        self.system_details.setReadOnly(True)
-        self.system_details.setStyleSheet("""
+        # Text edit for module details
+        self.module_details = QTextEdit()
+        self.module_details.setReadOnly(True)
+        self.module_details.setStyleSheet("""
             QTextEdit {
                 border: 1px solid #d9d9d9;
                 border-radius: 5px;
@@ -328,17 +297,17 @@ class SystemView(QWidget):
                 font-size: 14px;
             }
         """)
-        right_layout.addWidget(self.system_details)
+        right_layout.addWidget(self.module_details)
 
         # Construct button (initially hidden)
         self.construct_button = self.create_button("Construct")
-        self.construct_button.clicked.connect(self.construct_system)
+        self.construct_button.clicked.connect(self.construct_module)
         self.construct_button.hide()  # Initially hidden
         right_layout.addWidget(self.construct_button)
 
-        # View System BOM / View Module BOM button
-        self.view_bom_button = self.create_button("View System BOM")
-        self.view_bom_button.clicked.connect(self.view_system_bom)
+        # View BOM button
+        self.view_bom_button = self.create_button("View Module BOM")
+        self.view_bom_button.clicked.connect(self.view_module_bom)
         right_layout.addWidget(self.view_bom_button)
 
         # Back button
@@ -374,185 +343,57 @@ class SystemView(QWidget):
         """)
         return button
 
-    # Populate systems and modules in graphics scene
-    def populate_systems(self, systems):
-        self.systems_data = systems  # Store systems data for later use
-        # Instead of clearing the scene, we'll manage node visibility
-        if not hasattr(self, 'nodes_initialized'):
-            self.graphics_scene.clear()
-            self.node_items.clear()
-            self.system_nodes = {}
-            self.system_items = []
-            self.all_nodes = []  # Keep track of all nodes
-            self.initialize_nodes()
-            self.nodes_initialized = True
-        else:
-            self.update_node_visibility()
-
-       # Adjust scene rectangle with extra space
-        items_rect = self.graphics_scene.itemsBoundingRect()
-        extra_left = 200   # Adjust as needed
-        extra_right = 500  # Adjust as needed
-        extra_top = 200   # Adjust as needed
-        extra_bottom = 200  # Adjust as needed
-        items_rect.setLeft(items_rect.left() - extra_left)
-        items_rect.setRight(items_rect.right() + extra_right)
-        items_rect.setTop(items_rect.top() - extra_top)
-        items_rect.setBottom(items_rect.bottom() + extra_bottom)
-        self.graphics_scene.setSceneRect(items_rect)
-
-    # Initialize all nodes without clearing them later
-    def initialize_nodes(self):
-        x = 0  # Starting x position for systems
-        y = 0  # Starting y position
-
-        self.system_positions = []  # To store system positions and heights
-
-        # First pass: Calculate total height for each system
-        for system_name, system_data in self.systems_data.items():
-            modules = system_data.get('modules', {}) if isinstance(system_data, dict) else {}
-            num_modules = len(modules)
-            node_height = 80  # Height of a system node
-            module_node_height = 60  # Height of a module node
-            module_spacing = 100  # Spacing between modules
-            system_spacing = 50  # Spacing between systems
-
-            total_module_height = num_modules * (module_node_height + module_spacing) - module_spacing if num_modules > 0 else 0
-            total_height = max(total_module_height, node_height)
-            self.system_positions.append({
-                'name': system_name,
-                'data': system_data,
-                'y': y,
-                'total_height': total_height,
-                'num_modules': num_modules,
-                'modules': modules
-            })
-            y += total_height + system_spacing
-
-        # Create the Project Node
-        project_node_height = y
-        project_position = QPointF(self.project_node_x, project_node_height / 2)
-        self.project_node = self.add_node("A4IM Scanner", None, project_position, None, node_type='project')
-        self.all_nodes.append(self.project_node)
-
-        # Second pass: Position the systems and their modules
-        for system_info in self.system_positions:
-            system_name = system_info['name']
-            system_data = system_info['data']
-            system_y = system_info['y'] + system_info['total_height'] / 2
-            position = QPointF(0, system_y)
-            system_item = self.add_node(system_name, system_data, position, self.project_node, node_type='system')
-            self.system_nodes[system_name] = system_item
-            self.system_items.append(system_item)
-            self.all_nodes.append(system_item)
-
-            # Add modules
-            modules = system_info['modules']
-            num_modules = system_info['num_modules']
-            if num_modules > 0:
-                node_height = 60  # Height of a module node
-                child_spacing = 100
-                total_module_height = num_modules * (node_height + child_spacing) - module_spacing
-                start_y = system_item.pos().y() - total_module_height / 2 + node_height / 2
-                child_x = system_item.pos().x() + 200
-
-                index = 0
-                for module_name, module_data in modules.items():
-                    child_y = start_y + index * (node_height + child_spacing)
-                    child_position = QPointF(child_x, child_y)
-                    module_item = self.add_node(module_name, module_data, child_position, system_item, node_type='module')
-                    self.all_nodes.append(module_item)
-                    index += 1
-
-
-    # Update node visibility without clearing the scene
-    def update_node_visibility(self):
-        y = 0  # Starting y position
-        for system_info, system_item in zip(self.system_positions, self.system_items):
-            modules = system_info['modules']
-            num_modules = len(modules)
-            node_height = 80  # Height of a system node
-            module_node_height = 60  # Height of a module node
-            module_spacing = 100  # Spacing between modules
-            system_spacing = 50  # Spacing between systems
-
-            # Determine if modules should be shown
-            show_modules = not self.toggle_mode or (self.selected_node and self.selected_node.name == system_info['name'])
-
-            if show_modules:
-                total_module_height = num_modules * (module_node_height + module_spacing) - module_spacing if num_modules > 0 else 0
-            else:
-                total_module_height = 0
-                num_modules = 0
-
-            total_height = max(total_module_height, node_height)
-            system_info['y'] = y
-            system_info['total_height'] = total_height
-
-            # Update system node position
-            system_y = system_info['y'] + system_info['total_height'] / 2
-            system_item.setPos(QPointF(0, system_y))
-
-            y += total_height + system_spacing  # Move y down after positioning the system node
-
-            # Update module nodes
-            index = 0
-            for module_item in system_item.child_nodes:
-                if show_modules:
-                    node_height = 60
-                    child_spacing = 100
-                    total_module_height = num_modules * (node_height + child_spacing) - module_spacing
-                    start_y = system_item.pos().y() - total_module_height / 2 + node_height / 2
-                    child_x = system_item.pos().x() + 200
-                    child_y = start_y + index * (node_height + child_spacing)
-                    module_item.setPos(QPointF(child_x, child_y))
-                    module_item.setVisible(True)
-                    # Show lines connected to the module
-                    for line in module_item.connected_lines:
-                        line.setVisible(True)
-                        # Update line positions
-                        line.setLine(QLineF(system_item.pos(), module_item.pos()))
-                    index += 1
-                else:
-                    module_item.setVisible(False)
-                    # Hide lines connected to the module
-                    for line in module_item.connected_lines:
-                        line.setVisible(False)
-
-        # Update project node position
-        total_project_height = y
-        project_node_x = self.project_node_x  # Use the same x-coordinate as in initialize_nodes()
-        self.project_node.setPos(QPointF(project_node_x, total_project_height / 2))
-
-        # Update lines connecting project node to systems
-        for system_item in self.system_items:
-            for line in system_item.connected_lines:
-                if line in self.project_node.connected_lines:
-                    line.setLine(QLineF(self.project_node.pos(), system_item.pos()))
-
-        
-
-        # Update lines connecting project node to systems
-        for system_item in self.system_items:
-            for line in system_item.connected_lines:
-                if line in self.project_node.connected_lines:
-                    line.setLine(QLineF(self.project_node.pos(), system_item.pos()))
+    # Populate modules in graphics scene
+    def populate_modules(self, modules):
+        self.modules_data = modules  # Store modules data for later use
+        self.graphics_scene.clear()
+        self.node_items.clear()
+        self.all_nodes = []  # Keep track of all nodes
+        self.initialize_nodes()
 
         # Adjust scene rectangle with extra space
         items_rect = self.graphics_scene.itemsBoundingRect()
-        extra_left = 200   # Adjust as needed
-        extra_right = 500  # Adjust as needed
-        extra_top = 200   # Adjust as needed
-        extra_bottom = 200  # Adjust as needed
-        items_rect.setLeft(items_rect.left() - extra_left)
-        items_rect.setRight(items_rect.right() + extra_right)
-        items_rect.setTop(items_rect.top() - extra_top)
-        items_rect.setBottom(items_rect.bottom() + extra_bottom)
+        extra_space = 500
+        items_rect.adjust(-extra_space, -extra_space, extra_space, extra_space)
         self.graphics_scene.setSceneRect(items_rect)
 
-    # Add a node (project, system, or module)
-    def add_node(self, name, data, position, parent_node, node_type='module'):
-        node = NodeItem(name, data, self, node_type=node_type)
+    # Initialize nodes recursively
+    def initialize_nodes(self):
+        # Create the Project Node
+        self.project_node = self.add_node("A4IM Scanner", None, position=QPointF(0, 0), parent_node=None, depth=0)
+        self.layout_modules(self.modules_data, parent_node=self.project_node, depth=1, x=0, y=0)
+
+    # Layout modules recursively
+    def layout_modules(self, modules, parent_node, depth, x, y):
+        spacing_x = 200
+        spacing_y = 150
+        total_height = 0
+        positions = []
+        # First, calculate the total height needed
+        for module_name in modules:
+            child_modules = modules[module_name].get('submodules', {})
+            num_children = len(child_modules)
+            height = max((num_children * spacing_y), spacing_y)
+            total_height += height
+            positions.append((module_name, height))
+
+        # Start positioning child modules
+        current_y = y - total_height / 2
+        for module_name, height in positions:
+            module_data = modules[module_name]
+            module_data['depth'] = depth  # Store depth for styling purposes
+            position = QPointF(x + spacing_x, current_y + height / 2)
+            module_node = self.add_node(module_name, module_data, position, parent_node, depth)
+            self.all_nodes.append(module_node)
+            # Recurse into child modules
+            child_modules = module_data.get('submodules', {})
+            if child_modules:
+                self.layout_modules(child_modules, module_node, depth + 1, x + spacing_x, position.y())
+            current_y += height
+
+    # Add a node (project or module)
+    def add_node(self, name, data, position, parent_node, depth):
+        node = NodeItem(name, data if data else {}, self, node_type='module' if parent_node else 'project')
         node.setPos(position)
         node.setZValue(1)
         self.graphics_scene.addItem(node)
@@ -578,21 +419,23 @@ class SystemView(QWidget):
         self.selected_node = node
         name = node.name
         data = node.data
-        if isinstance(data, dict):
-            description = data.get('description', 'No details available.')
-            assigned = data.get('assigned_to', 'None')
-        else:
-            description = str(data) if data else 'No details available.'
-            assigned = 'None'
 
-        self.system_details.setText(f"{name}\n\n{description}")
+        # Strip text in square brackets from name and description
+        display_name = re.sub(r'\[.*?\]', '', name).strip()
+        description = data.get('description', 'No details available.')
+        description = re.sub(r'\[.*?\]', '', description).strip()
+
+        assigned = data.get('assigned_to', 'None')
+
+        # Display name and description in the details pane
+        self.module_details.setText(f"Name: {display_name}\n\nDescription:\n{description}")
         self.assigned_value.setText(assigned)
         if assigned == 'None':
             self.assigned_value.setStyleSheet("color: #808080;")
         else:
             self.assigned_value.setStyleSheet("color: black;")
 
-        # Show completion checkbox if it's a module
+        # Show completion checkbox for modules (not for project node)
         if node.node_type == 'module':
             self.completion_checkbox.show()
             self.completion_checkbox.blockSignals(True)
@@ -602,7 +445,7 @@ class SystemView(QWidget):
             # Show the Construct button
             self.construct_button.show()
 
-            # Change View BOM button text to "View Module BOM"
+            # Update View BOM button
             self.view_bom_button.setText("View Module BOM")
             self.view_bom_button.clicked.disconnect()
             self.view_bom_button.clicked.connect(self.view_module_bom)
@@ -613,19 +456,14 @@ class SystemView(QWidget):
             # Hide the Construct button
             self.construct_button.hide()
 
-            # Change View BOM button text to "View System BOM" or hide if project node
-            if node.node_type == 'system':
-                self.view_bom_button.setText("View System BOM")
-                self.view_bom_button.clicked.disconnect()
-                self.view_bom_button.clicked.connect(self.view_system_bom)
-            else:
-                self.view_bom_button.setText("View Project Info")
-                self.view_bom_button.clicked.disconnect()
-                self.view_bom_button.clicked.connect(self.view_project_info)
+            # Update View BOM button
+            self.view_bom_button.setText("View Project Info")
+            self.view_bom_button.clicked.disconnect()
+            self.view_bom_button.clicked.connect(self.view_project_info)
 
-        # If in toggle mode and a system node is clicked, update the display
-        if self.toggle_mode and node.node_type == 'system':
-            self.update_toggle_view()
+        # If in toggle mode and a module node is clicked, update the display
+        if self.toggle_mode:
+            self.update_toggle_view(node)
 
     # Start editing assigned value
     def start_editing(self, event):
@@ -654,35 +492,20 @@ class SystemView(QWidget):
         if self.selected_node:
             self.selected_node.completed = bool(state)
             self.selected_node.update_node_color()
-            # Update parent system node status
+            # Update parent module node status
             parent_node = self.selected_node.parent_node
             while parent_node:
                 parent_node.update_node_color()
                 parent_node = parent_node.parent_node
 
-    # View system BOM
-    def view_system_bom(self):
-        if self.selected_node:
-            name = self.selected_node.name
-            if self.selected_node.node_type == 'system':
-                # Open the system BOM URL
-                url = "https://matthewbeddows.github.io/A4IM-ProjectArchitect/GitBuilding/index_BOM.html"
-                self.parent.show_git_building(system=name, module=None, url=url)
-            else:
-                print("Please select a system to view its BOM.")
-        else:
-            print("No system selected")
-
     # View module BOM
     def view_module_bom(self):
         if self.selected_node:
             name = self.selected_node.name
-            if self.selected_node.node_type == 'module':
-                # Open the module BOM URL
-                url = "https://matthewbeddows.github.io/A4IM-ProjectArchitect/GitBuilding/index_BOM.html"
-                self.parent.show_git_building(system=None, module=name, url=url)
-            else:
-                print("Please select a module to view its BOM.")
+            # Implement logic to open the module BOM URL
+            # For now, we'll just print a message
+            print(f"Viewing BOM for module: {name}")
+            # You can use self.parent.show_git_building(...) if needed
         else:
             print("No module selected")
 
@@ -692,26 +515,21 @@ class SystemView(QWidget):
             name = self.selected_node.name
             if self.selected_node.node_type == 'project':
                 # Open the project info URL or display project information
-                # For now, we'll just print a message
                 print(f"Viewing project info for: {name}")
-                # Implement logic to view project info if needed
             else:
                 print("Please select the project node to view its info.")
         else:
             print("No project selected")
 
-    # Construct system or module
-    def construct_system(self):
+    # Construct module
+    def construct_module(self):
         if self.selected_node:
             name = self.selected_node.name
-            if self.selected_node.node_type == 'module':
-                # Open the construct URL for the module
-                url = "https://matthewbeddows.github.io/A4IM-ProjectArchitect/GitBuilding/testpage1.html"
-                self.parent.show_git_building(system=None, module=name, url=url)
-            else:
-                print("Please select a module to construct.")
+            # Implement logic to open the construct URL for the module
+            print(f"Constructing module: {name}")
+            # You can use self.parent.show_git_building(...) if needed
         else:
-            print("Please select a node")
+            print("Please select a module")
 
     # Recenter the graphics view
     def recenter_view(self):
@@ -729,5 +547,17 @@ class SystemView(QWidget):
         self.update_node_visibility()
 
     # Update the view when toggled
-    def update_toggle_view(self):
-        self.update_node_visibility()
+    def update_toggle_view(self, node):
+        # Hide all child nodes except for the selected one
+        for n in self.all_nodes:
+            if n != node and n.parent_node == node:
+                n.setVisible(not n.isVisible())
+                for line in n.connected_lines:
+                    line.setVisible(n.isVisible())
+
+    # Update node visibility (used when toggling)
+    def update_node_visibility(self):
+        for node in self.all_nodes:
+            node.setVisible(True)
+            for line in node.connected_lines:
+                line.setVisible(True)

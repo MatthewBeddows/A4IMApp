@@ -1,7 +1,6 @@
 # main_menu_widget.py
-
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QPushButton, QLabel, QFrame
-from PyQt5.QtCore import Qt, QSize
+from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont, QColor, QPalette, QPixmap
 
 class MainMenuWidget(QWidget):
