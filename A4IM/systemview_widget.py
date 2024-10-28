@@ -1,10 +1,11 @@
 from PyQt5.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QTextEdit, QPushButton, QLabel, QLineEdit, QCheckBox,
     QGraphicsView, QGraphicsScene, QGraphicsRectItem, QGraphicsTextItem,
-    QGraphicsLineItem, QGraphicsItem, QGraphicsPixmapItem
+    QGraphicsLineItem, QGraphicsItem, QGraphicsPixmapItem, QMessageBox, QApplication
 )
 from PyQt5.QtCore import Qt, QPointF, QRectF, QLineF
 from PyQt5.QtGui import QFont, QColor, QPen, QBrush, QPainter, QPixmap
+from PyQt5.QtCore import QUrl
 import math
 import os
 import re  # For regex operations to strip text in square brackets
@@ -155,7 +156,6 @@ class SystemView(QWidget):
         self.modules_data = {}  # Store modules data
         self.setup_ui()
 
-    # Set up the user interface
     def setup_ui(self):
         layout = QHBoxLayout()
         layout.setSpacing(20)
@@ -204,22 +204,7 @@ class SystemView(QWidget):
 
         # Reset View button
         reset_view_button = QPushButton("Reset View")
-        reset_view_button.setStyleSheet("""
-            QPushButton {
-                background-color: #465775;
-                color: white;
-                font-size: 12px;
-                border: none;
-                padding: 5px 10px;
-                border-radius: 5px;
-            }
-            QPushButton:hover {
-                background-color: #566985;
-            }
-            QPushButton:pressed {
-                background-color: #364765;
-            }
-        """)
+        reset_view_button.setStyleSheet(self.get_button_style())
         reset_view_button.clicked.connect(self.recenter_view)
         reset_view_button.setToolTip("Reset the view to the default position and zoom level")
         reset_view_button.setFixedSize(100, 30)
@@ -227,56 +212,80 @@ class SystemView(QWidget):
 
         # Toggle All button
         self.toggle_button = QPushButton("Toggle All")
-        self.toggle_button.setStyleSheet("""
-            QPushButton {
-                background-color: #465775;
-                color: white;
-                font-size: 12px;
-                border: none;
-                padding: 5px 10px;
-                border-radius: 5px;
-            }
-            QPushButton:hover {
-                background-color: #566985;
-            }
-            QPushButton:pressed {
-                background-color: #364765;
-            }
-        """)
+        self.toggle_button.setStyleSheet(self.get_button_style())
         self.toggle_button.clicked.connect(self.toggle_modules)
         self.toggle_button.setToolTip("Toggle visibility of child modules")
         self.toggle_button.setFixedSize(100, 30)
         button_layout.addWidget(self.toggle_button)
 
         graphics_layout.addLayout(button_layout)
-
         left_layout.addWidget(graphics_container)
 
         # Right layout for module details and buttons
         right_layout = QVBoxLayout()
 
-        # Label for module details
-        details_label = QLabel("Module Details")
-        details_label.setFont(QFont('Arial', 16, QFont.Bold))
-        details_label.setStyleSheet("color: #465775;")
-        right_layout.addWidget(details_label)
+# Module Title (initially hidden)
+        self.module_title = QLabel()
+        self.module_title.setFont(QFont('Arial', 16, QFont.Bold))
+        self.module_title.setStyleSheet("color: #465775; margin-bottom: 10px;")
+        self.module_title.setWordWrap(True)
+        self.module_title.hide()
+        right_layout.addWidget(self.module_title)
+
+        # Container for repo link and assigned user
+        header_container = QHBoxLayout()
+        header_container.setSpacing(20)  # Space between elements
+
+        # Repository Link Label (initially hidden)
+        self.repo_link = QLabel()
+        self.repo_link.setStyleSheet("""
+            QLabel {
+                color: #0066cc;
+                font-size: 14px;
+                font-weight: bold;
+            }
+            QLabel:hover {
+                color: #003399;
+                cursor: pointer;
+            }
+        """)
+        self.repo_link.setCursor(Qt.PointingHandCursor)
+        self.repo_link.mousePressEvent = self.open_repo_link
+        self.repo_link.hide()
+        header_container.addWidget(self.repo_link)
+
+        # Add stretch to push assigned section to the right
+        header_container.addStretch()
 
         # User/Team Assigned section
-        assigned_layout = QHBoxLayout()
+        assigned_container = QHBoxLayout()
+        assigned_container.setSpacing(5)  # Space between label and value
+        
         assigned_label = QLabel("User/Team Assigned:")
         assigned_label.setStyleSheet("color: #465775; font-weight: bold;")
+        assigned_container.addWidget(assigned_label)
+        
         self.assigned_value = QLabel("None")
         self.assigned_value.setStyleSheet("color: #808080;")
         self.assigned_value.mousePressEvent = self.start_editing
+        assigned_container.addWidget(self.assigned_value)
+        
         self.assigned_edit = QLineEdit()
         self.assigned_edit.setStyleSheet("color: black;")
         self.assigned_edit.hide()
         self.assigned_edit.editingFinished.connect(self.finish_editing)
-        assigned_layout.addWidget(assigned_label)
-        assigned_layout.addWidget(self.assigned_value)
-        assigned_layout.addWidget(self.assigned_edit)
-        assigned_layout.addStretch()
-        right_layout.addLayout(assigned_layout)
+        assigned_container.addWidget(self.assigned_edit)
+
+        # Add the assigned container to the header
+        header_container.addLayout(assigned_container)
+
+        # Add the header container to the main layout
+        right_layout.addLayout(header_container)
+
+        # Add some vertical spacing after the header
+        spacer = QWidget()
+        spacer.setFixedHeight(10)
+        right_layout.addWidget(spacer)
 
         # Checkbox for module completion
         self.completion_checkbox = QCheckBox("Mark as Completed")
@@ -299,18 +308,16 @@ class SystemView(QWidget):
         """)
         right_layout.addWidget(self.module_details)
 
-        # Construct button (initially hidden)
+        # Buttons at the bottom
         self.construct_button = self.create_button("Construct")
         self.construct_button.clicked.connect(self.construct_module)
-        self.construct_button.hide()  # Initially hidden
+        self.construct_button.hide()
         right_layout.addWidget(self.construct_button)
 
-        # View BOM button
         self.view_bom_button = self.create_button("View Module BOM")
         self.view_bom_button.clicked.connect(self.view_module_bom)
         right_layout.addWidget(self.view_bom_button)
 
-        # Back button
         back_button = self.create_button("Back")
         back_button.clicked.connect(self.parent.show_main_menu)
         right_layout.addWidget(back_button)
@@ -425,10 +432,22 @@ class SystemView(QWidget):
         description = data.get('description', 'No details available.')
         description = re.sub(r'\[.*?\]', '', description).strip()
 
+        # Update and show the title
+        self.module_title.setText(display_name)
+        self.module_title.show()
+
+        # Show/hide repo link based on whether we have repository info
+        repository_info = data.get('repository', {})
+        if repository_info and repository_info.get('address'):
+            self.repo_link.setText("Link to Repo")
+            self.repo_link.show()
+        else:
+            self.repo_link.hide()
+
         assigned = data.get('assigned_to', 'None')
 
-        # Display name and description in the details pane
-        self.module_details.setText(f"Name: {display_name}\n\nDescription:\n{description}")
+        # Display just the description in the details pane
+        self.module_details.setText(description)
         self.assigned_value.setText(assigned)
         if assigned == 'None':
             self.assigned_value.setStyleSheet("color: #808080;")
@@ -442,8 +461,12 @@ class SystemView(QWidget):
             self.completion_checkbox.setChecked(node.completed)
             self.completion_checkbox.blockSignals(False)
 
-            # Show the Construct button
-            self.construct_button.show()
+            # Check if module has docs
+            repository_info = data.get('repository', {})
+            if repository_info and repository_info.get('docs_path'):
+                self.construct_button.show()
+            else:
+                self.construct_button.hide()
 
             # Update View BOM button
             self.view_bom_button.setText("View Module BOM")
@@ -452,8 +475,6 @@ class SystemView(QWidget):
 
         else:
             self.completion_checkbox.hide()
-
-            # Hide the Construct button
             self.construct_button.hide()
 
             # Update View BOM button
@@ -464,6 +485,35 @@ class SystemView(QWidget):
         # If in toggle mode and a module node is clicked, update the display
         if self.toggle_mode:
             self.update_toggle_view(node)
+
+
+    def get_button_style(self):
+        return """
+            QPushButton {
+                background-color: #465775;
+                color: white;
+                font-size: 12px;
+                border: none;
+                padding: 5px 10px;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #566985;
+            }
+            QPushButton:pressed {
+                background-color: #364765;
+            }
+        """
+
+    def get_repo_name_from_node(self, node):
+        """Extract repository name from module data"""
+        if node.data and 'submodule_addresses' in node.data:
+            # Get the first address (assuming it's the main module address)
+            addresses = node.data.get('submodule_addresses', [])
+            if addresses:
+                # Extract repo name from the GitHub URL
+                return addresses[0].split('/')[-1]
+        return None
 
     # Start editing assigned value
     def start_editing(self, event):
@@ -521,16 +571,19 @@ class SystemView(QWidget):
         else:
             print("No project selected")
 
-    # Construct module
     def construct_module(self):
         if self.selected_node:
-            name = self.selected_node.name
-            # Implement logic to open the construct URL for the module
-            print(f"Constructing module: {name}")
-            # You can use self.parent.show_git_building(...) if needed
-        else:
-            print("Please select a module")
-
+            repository_info = self.selected_node.data.get('repository', {})
+            if repository_info and repository_info.get('docs_path'):
+                file_url = QUrl.fromLocalFile(os.path.abspath(repository_info['docs_path']))
+                self.parent.show_git_building(
+                    self.selected_node.name,
+                    None,
+                    file_url.toString()
+                )
+            else:
+                print("No documentation available for this module")
+                
     # Recenter the graphics view
     def recenter_view(self):
         self.graphics_view.resetTransform()
@@ -554,6 +607,39 @@ class SystemView(QWidget):
                 n.setVisible(not n.isVisible())
                 for line in n.connected_lines:
                     line.setVisible(n.isVisible())
+
+
+    def open_repo_link(self, event):
+        if self.selected_node:
+            repository_info = self.selected_node.data.get('repository', {})
+            if repository_info and repository_info.get('address'):
+                url = repository_info['address']
+                # Ensure URL starts with http:// or https://
+                if not url.startswith(('http://', 'https://')):
+                    url = 'https://' + url
+
+                try:
+                    # Use powershell.exe through WSL to open the URL in Windows' default browser
+                    import subprocess
+                    subprocess.run(['powershell.exe', 'start', url])
+                except Exception as e:
+                    msg = QMessageBox(self)
+                    msg.setIcon(QMessageBox.Information)
+                    msg.setWindowTitle("Repository Link")
+                    msg.setText("Unable to open browser automatically.\nPlease copy this URL:")
+                    msg.setInformativeText(url)
+                    msg.setStandardButtons(QMessageBox.Ok)
+                    
+                    # Add copy button
+                    copy_button = msg.addButton("Copy URL", QMessageBox.ActionRole)
+                    copy_button.clicked.connect(lambda: self.copy_to_clipboard(url))
+                    
+                    msg.exec_()
+
+    def copy_to_clipboard(self, text):
+        """Helper method to copy text to clipboard"""
+        clipboard = QApplication.clipboard()
+        clipboard.setText(text)
 
     # Update node visibility (used when toggling)
     def update_node_visibility(self):

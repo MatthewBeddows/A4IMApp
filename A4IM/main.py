@@ -162,10 +162,8 @@ class GitFileReaderApp(QMainWindow):
             module_addresses = [line.split("] ")[1].strip() for line in content.split("\n") if line.startswith("[module address]")]
         else:
             # Parsing submodules from parent module
-            # Navigate to the parent module in self.modules
             current_module = self.modules
             for module_name_in_path in parent_module_path:
-                # Access the module by name
                 current_module = current_module[module_name_in_path]
             module_addresses = current_module.get('submodule_addresses', [])
 
@@ -188,28 +186,22 @@ class GitFileReaderApp(QMainWindow):
                     while i < len(lines):
                         line = lines[i].strip()
                         if line.startswith('[Module Name]'):
-                            # The module name is on the same line
                             module_name = line[len('[Module Name]'):].strip()
                             i += 1
                         elif line.startswith('[Module Info]'):
-                            # The module description is on the same line
                             module_description = line[len('[Module Info]'):].strip()
                             i += 1
-                            # Collect additional lines until the next section
                             while i < len(lines) and not lines[i].startswith('['):
                                 module_description += ' ' + lines[i].strip()
                                 i += 1
                         elif line.startswith('[Submodules]'):
-                            # Start collecting submodule addresses
                             in_submodules_section = True
                             i += 1
                         elif in_submodules_section and line.startswith('[Module Address]'):
-                            # Collect submodule addresses
                             address = line.split('] ')[1].strip()
                             submodule_addresses.append(address)
                             i += 1
                         elif line.startswith('['):
-                            # Exit the current section
                             in_submodules_section = False
                             i += 1
                         else:
@@ -219,45 +211,41 @@ class GitFileReaderApp(QMainWindow):
                         print(f"Module name not found in {module_info_path}")
                         continue
 
+                    # Check for docs/index.html
+                    docs_path = os.path.join(download_dir, repo_name, "docs", "index.html")
+                    has_docs = os.path.exists(docs_path)
+
+                    module_data = {
+                        'description': module_description.strip(),
+                        'submodules': OrderedDict(),
+                        'submodule_addresses': submodule_addresses,
+                        'repository': {
+                            'name': repo_name,
+                            'address': module_address,
+                            'docs_path': docs_path if has_docs else None
+                        }
+                    }
+
                     if parent_module_path is None:
                         # Top-level module
-                        self.modules[module_name] = {
-                            'description': module_description.strip(),
-                            'submodules': OrderedDict(),
-                            'submodule_addresses': submodule_addresses
-                        }
+                        self.modules[module_name] = module_data
                         self.module_order.append(module_name)
                     else:
                         # Submodule
-                        # Navigate to the parent module in self.modules
                         current_module = self.modules
                         for module_name_in_path in parent_module_path:
-                            # Access the module by name
                             current_module = current_module[module_name_in_path]
-                            # Ensure 'submodules' key exists
                             if 'submodules' not in current_module:
                                 current_module['submodules'] = OrderedDict()
-                        # Add the submodule to the parent module's 'submodules'
-                        current_module['submodules'][module_name] = {
-                            'description': module_description.strip(),
-                            'submodules': OrderedDict(),
-                            'submodule_addresses': submodule_addresses
-                        }
+                        current_module['submodules'][module_name] = module_data
+
                     # Recursively download submodules if any
                     if submodule_addresses:
-                        # Keep the path to the current module
                         current_module_path = parent_module_path.copy() if parent_module_path else []
                         current_module_path.append(module_name)
-                        # Download submodules
                         self.download_modules(current_module_path, submodule_addresses)
             else:
                 print(f"moduleInfo.txt not found for repository: {repo_name}")
-
-
-        # If parent_module_path is None, and all threads are done, show the system view
-        if parent_module_path is None and not self.active_threads:
-            # After all modules and submodules are downloaded and parsed, show the system view
-            self.show_system_view()
     
     def update_progress(self, value):
         # Update the progress bar value
