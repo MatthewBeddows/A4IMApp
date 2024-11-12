@@ -35,41 +35,24 @@ class GitFileReaderApp(QMainWindow):
         self.git_building_runner.log.connect(self.on_git_building_log)
         self.run_git_building()
     
-        # Show the main menu
-        self.show_main_menu()
+        # Hide the main menu initially
+        self.main_menu.hide()
         
         # Initialize modules data structure
         self.modules = {}  # Stores modules and submodules
         self.module_order = []  # Tracks the order of top-level modules
         self.progress_bar = None  # Initialize progress_bar to None
+        
+        # Track loading state
+        self.loading_complete = False
+        self.pending_downloads = 0  # Track number of active downloads
 
         # Keep track of active threads
         self.active_threads = []
 
         # Start downloading the project architect
         self.download_project_architect()
-    
-    def run_git_building(self):
-        # Run GitBuilding setup (you might want to disable UI elements here)
-        self.git_building_runner.run()
-    
-    def on_git_building_log(self, message):
-        # Update a QTextEdit or similar widget to show the log
-        print(message)  # For now, just print to console
-    
-    def show_main_menu(self):
-        self.central_widget.setCurrentWidget(self.main_menu)
-    
-    def show_system_view(self):
-        # Pass the modules data structure to the system view
-        self.system_view.populate_modules(self.modules)
-        self.central_widget.setCurrentWidget(self.system_view)
-    
-    def show_git_building(self, module, submodule, url):
-        # Load the URL in the GitBuilding widget
-        self.git_building.load_url(url)
-        self.central_widget.setCurrentWidget(self.git_building)
-    
+
     def download_project_architect(self):
         # Define the target folder where the repositories will be downloaded
         download_dir = os.path.join(os.getcwd(), "Downloaded Repositories")
@@ -92,28 +75,33 @@ class GitFileReaderApp(QMainWindow):
             self.parse_project_architect()
         else:
             QMessageBox.critical(self, "Download Error", "Failed to download Project Architect file.")
-    
-    def parse_project_architect(self):
-        # Read the architect.txt file and extract module addresses
-        with open("architect.txt", "r") as f:
-            content = f.read()
-        
-        # Parse '[module address]' lines
-        module_addresses = [line.split("] ")[1].strip() for line in content.split("\n") if line.startswith("[module address]")]
 
-        # Clean up addresses
-        cleaned_addresses = []
-        for address in module_addresses:
-            if address.count("https://") > 1:
-                address = address.replace("https://", "", address.count("https://") - 1)
-            if address.count("github.com") > 1:
-                address = address.replace("github.com/", "", address.count("github.com") - 1)
-            cleaned_addresses.append(address)
-        
-        # Start downloading top-level modules
-        self.download_modules(parent_module_path=None, module_addresses=cleaned_addresses)
+    def run_git_building(self):
+        # Run GitBuilding setup (you might want to disable UI elements here)
+        self.git_building_runner.run()
     
+    def on_git_building_log(self, message):
+        # Update a QTextEdit or similar widget to show the log
+        print(message)  # For now, just print to console
+    
+    def show_main_menu(self):
+        if self.loading_complete:
+            self.central_widget.setCurrentWidget(self.main_menu)
+    
+    def show_system_view(self):
+        # Pass the modules data structure to the system view
+        self.system_view.populate_modules(self.modules)
+        self.central_widget.setCurrentWidget(self.system_view)
+    
+    def show_git_building(self, module, submodule, url):
+        # Load the URL in the GitBuilding widget
+        self.git_building.load_url(url)
+        self.central_widget.setCurrentWidget(self.git_building)
+
     def download_modules(self, parent_module_path, module_addresses):
+        # Increment pending downloads counter
+        self.pending_downloads += 1
+        
         # Initialize or reset the progress bar
         if self.progress_bar is None:
             self.progress_bar = QProgressBar(self)
@@ -134,21 +122,58 @@ class GitFileReaderApp(QMainWindow):
         download_thread.progress.connect(self.update_progress)
         download_thread.finished.connect(lambda: self.module_download_finished(parent_module_path, download_thread))
         download_thread.start()
-        self.active_threads.append(download_thread)  # Keep a strong reference
+        self.active_threads.append(download_thread)
 
     def module_download_finished(self, parent_module_path, thread):
         # Remove the thread from active threads
         if thread in self.active_threads:
             self.active_threads.remove(thread)
 
-        # Remove the progress bar after download completes
-        if self.progress_bar:
-            self.progress_bar.setParent(None)
-            self.progress_bar.deleteLater()
-            self.progress_bar = None
+        # Decrement pending downloads counter
+        self.pending_downloads -= 1
+        
         # Parse the moduleInfo.txt files
         self.parse_module_info(parent_module_path)
-    
+        
+        # Check if all downloads are complete
+        if self.pending_downloads == 0:
+            # Remove the progress bar
+            if self.progress_bar:
+                self.progress_bar.setParent(None)
+                self.progress_bar.deleteLater()
+                self.progress_bar = None
+            
+            # Set loading complete flag
+            self.loading_complete = True
+            
+            # Show the main menu and make it accessible
+            self.main_menu.show()
+            self.show_main_menu()
+
+    def parse_project_architect(self):
+        # Read the architect.txt file and extract module addresses
+        with open("architect.txt", "r") as f:
+            content = f.read()
+        
+        # Parse '[module address]' lines
+        module_addresses = [line.split("] ")[1].strip() for line in content.split("\n") if line.startswith("[module address]")]
+
+        # Clean up addresses
+        cleaned_addresses = []
+        for address in module_addresses:
+            if address.count("https://") > 1:
+                address = address.replace("https://", "", address.count("https://") - 1)
+            if address.count("github.com") > 1:
+                address = address.replace("github.com/", "", address.count("github.com") - 1)
+            cleaned_addresses.append(address)
+        
+        # Reset loading state before starting downloads
+        self.loading_complete = False
+        self.pending_downloads = 0
+        
+        # Start downloading top-level modules
+        self.download_modules(parent_module_path=None, module_addresses=cleaned_addresses)
+
     def parse_module_info(self, parent_module_path):
         """
         Parses moduleInfo.txt files and updates the modules data structure.
@@ -162,10 +187,8 @@ class GitFileReaderApp(QMainWindow):
             module_addresses = [line.split("] ")[1].strip() for line in content.split("\n") if line.startswith("[module address]")]
         else:
             # Parsing submodules from parent module
-            # Navigate to the parent module in self.modules
             current_module = self.modules
             for module_name_in_path in parent_module_path:
-                # Access the module by name
                 current_module = current_module[module_name_in_path]
             module_addresses = current_module.get('submodule_addresses', [])
 
@@ -188,28 +211,22 @@ class GitFileReaderApp(QMainWindow):
                     while i < len(lines):
                         line = lines[i].strip()
                         if line.startswith('[Module Name]'):
-                            # The module name is on the same line
                             module_name = line[len('[Module Name]'):].strip()
                             i += 1
                         elif line.startswith('[Module Info]'):
-                            # The module description is on the same line
                             module_description = line[len('[Module Info]'):].strip()
                             i += 1
-                            # Collect additional lines until the next section
                             while i < len(lines) and not lines[i].startswith('['):
                                 module_description += ' ' + lines[i].strip()
                                 i += 1
                         elif line.startswith('[Submodules]'):
-                            # Start collecting submodule addresses
                             in_submodules_section = True
                             i += 1
                         elif in_submodules_section and line.startswith('[Module Address]'):
-                            # Collect submodule addresses
                             address = line.split('] ')[1].strip()
                             submodule_addresses.append(address)
                             i += 1
                         elif line.startswith('['):
-                            # Exit the current section
                             in_submodules_section = False
                             i += 1
                         else:
@@ -219,45 +236,41 @@ class GitFileReaderApp(QMainWindow):
                         print(f"Module name not found in {module_info_path}")
                         continue
 
+                    # Check for docs/index.html
+                    docs_path = os.path.join(download_dir, repo_name, "docs", "index.html")
+                    has_docs = os.path.exists(docs_path)
+
+                    module_data = {
+                        'description': module_description.strip(),
+                        'submodules': OrderedDict(),
+                        'submodule_addresses': submodule_addresses,
+                        'repository': {
+                            'name': repo_name,
+                            'address': module_address,
+                            'docs_path': docs_path if has_docs else None
+                        }
+                    }
+
                     if parent_module_path is None:
                         # Top-level module
-                        self.modules[module_name] = {
-                            'description': module_description.strip(),
-                            'submodules': OrderedDict(),
-                            'submodule_addresses': submodule_addresses
-                        }
+                        self.modules[module_name] = module_data
                         self.module_order.append(module_name)
                     else:
                         # Submodule
-                        # Navigate to the parent module in self.modules
                         current_module = self.modules
                         for module_name_in_path in parent_module_path:
-                            # Access the module by name
                             current_module = current_module[module_name_in_path]
-                            # Ensure 'submodules' key exists
                             if 'submodules' not in current_module:
                                 current_module['submodules'] = OrderedDict()
-                        # Add the submodule to the parent module's 'submodules'
-                        current_module['submodules'][module_name] = {
-                            'description': module_description.strip(),
-                            'submodules': OrderedDict(),
-                            'submodule_addresses': submodule_addresses
-                        }
+                        current_module['submodules'][module_name] = module_data
+
                     # Recursively download submodules if any
                     if submodule_addresses:
-                        # Keep the path to the current module
                         current_module_path = parent_module_path.copy() if parent_module_path else []
                         current_module_path.append(module_name)
-                        # Download submodules
                         self.download_modules(current_module_path, submodule_addresses)
             else:
                 print(f"moduleInfo.txt not found for repository: {repo_name}")
-
-
-        # If parent_module_path is None, and all threads are done, show the system view
-        if parent_module_path is None and not self.active_threads:
-            # After all modules and submodules are downloaded and parsed, show the system view
-            self.show_system_view()
     
     def update_progress(self, value):
         # Update the progress bar value
@@ -265,7 +278,6 @@ class GitFileReaderApp(QMainWindow):
             self.progress_bar.setValue(value)
         else:
             print(f"Progress update: {value}%")
-    
 if __name__ == "__main__":
     app = QApplication(sys.argv + ['--disable-seccomp-filter-sandbox'])
     window = GitFileReaderApp()
