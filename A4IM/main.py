@@ -9,13 +9,19 @@ from gitbuilding_widget import GitBuildingWindow
 from systemview_widget import SystemView
 from download_thread import DownloadThread
 from gitbuilding_setup import GitBuildingSetup
+from ArchitectSelector_widget import ArchitectSelector
 
 class GitFileReaderApp(QMainWindow):
-    def __init__(self):
+    def __init__(self, architect_url,architect_folder):
         super().__init__()
         self.setWindowTitle("Git File Reader")
         self.setGeometry(100, 100, 800, 600)
-        
+
+        # Store the selected architect URL
+        self.architect_url = architect_url
+        self.architect_folder = architect_folder
+
+
         # Central widget setup
         self.central_widget = QStackedWidget()
         self.setCentralWidget(self.central_widget)
@@ -55,7 +61,7 @@ class GitFileReaderApp(QMainWindow):
 
     def download_project_architect(self):
         download_dir = os.path.join(os.getcwd(), "Downloaded Repositories")
-        architect_dir = os.path.join(download_dir, "ArchitectRepository")
+        architect_dir = os.path.join(download_dir, self.architect_folder)
         clone_folder = os.path.join(architect_dir, "ProjectArchitect")
 
         if not os.path.exists(download_dir):
@@ -71,8 +77,7 @@ class GitFileReaderApp(QMainWindow):
         try:
             import git
             repo = git.Repo.clone_from(
-                #"https://github.com/MatthewBeddows/COSI-Architect",
-                "https://github.com/MatthewBeddows/A4IM-ProjectArchitect.git",
+                self.architect_url,
                 clone_folder
             )
             
@@ -80,13 +85,13 @@ class GitFileReaderApp(QMainWindow):
             if os.path.exists(architect_path):
                 with open(architect_path, 'r') as f:
                     content = f.read()
-                    for line in content.split('\n'):
-                        if line.startswith('[module address]'):
-                            module_url = line.split('] ')[1].strip()
-                            module_name = module_url.split('/')[-1]
-                            module_path = os.path.join(architect_dir, module_name)
-                            git.Repo.clone_from(module_url, module_path)
-            
+                    # for line in content.split('\n'):
+                    #     if line.startswith('[module address]'):
+                    #         module_url = line.split('] ')[1].strip()
+                    #         module_name = module_url.split('/')[-1]
+                    #         module_path = os.path.join(architect_dir, module_name)
+                    #         git.Repo.clone_from(module_url, module_path)
+                
                 self.parse_project_architect(architect_path)
             else:
                 QMessageBox.critical(self, "File Error", "architect.txt not found in cloned repository.")
@@ -94,6 +99,7 @@ class GitFileReaderApp(QMainWindow):
             QMessageBox.critical(self, "Clone Error", f"Failed to clone repository: {str(e)}")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"An error occurred: {str(e)}")
+
 
     def run_git_building(self):
         self.git_building_runner.run()
@@ -129,7 +135,7 @@ class GitFileReaderApp(QMainWindow):
             self.progress_bar.setAlignment(Qt.AlignCenter)
             self.main_menu.layout().addWidget(self.progress_bar)
         
-        download_thread = DownloadThread(module_addresses)
+        download_thread = DownloadThread(module_addresses, self.architect_folder)
         download_thread.progress.connect(self.update_progress)
         download_thread.finished.connect(lambda: self.module_download_finished(parent_module_path, download_thread))
         download_thread.start()
@@ -173,15 +179,15 @@ class GitFileReaderApp(QMainWindow):
         self.download_modules(parent_module_path=None, module_addresses=cleaned_addresses)
 
     def parse_module_info(self, parent_module_path):
-        architect_dir = os.path.join("Downloaded Repositories", "ArchitectRepository")
+        architect_dir = os.path.join("Downloaded Repositories", self.architect_folder)
         
         if parent_module_path is None:
             architect_file = os.path.join(architect_dir, "ProjectArchitect", "architect.txt")
             with open(architect_file, "r") as f:
                 content = f.read()
             module_addresses = [line.split("] ")[1].strip() 
-                              for line in content.split("\n") 
-                              if line.startswith("[module address]")]
+                            for line in content.split("\n") 
+                            if line.startswith("[module address]")]
         else:
             current_module = self.modules
             for name in parent_module_path:
@@ -270,6 +276,8 @@ class GitFileReaderApp(QMainWindow):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv + ['--disable-seccomp-filter-sandbox'])
-    window = GitFileReaderApp()
-    window.show()
+    selector = ArchitectSelector()
+    selector.show()
     sys.exit(app.exec_())
+
+
