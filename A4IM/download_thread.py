@@ -11,7 +11,7 @@ class DownloadThread(QThread):
         self.repo_urls = repo_urls
         self._is_running = True
     
-    # The stop method sets _is_running to False. This allows the thread to be gracefully stopped if needed.
+    # Let me stop this if I need to
     def stop(self):
         self._is_running = False
 
@@ -25,11 +25,10 @@ class DownloadThread(QThread):
 
             print(f"Processing repository URL: {url}")
             repo_name = url.split('/')[-1]
-            local_path = os.path.join("Downloaded Repositories", repo_name)
-            
+            # All modules go into ArchitectRepository now
+            local_path = os.path.join("Downloaded Repositories", "ArchitectRepository", repo_name)
 
-
-            # Try-except to prevent the thread from crashing in case of errors during cloning or updating repositories.
+            # Check if we already have it - if so, just update it
             if os.path.exists(local_path):
                 print(f"Repository {repo_name} already exists. Updating...")
                 try:
@@ -40,6 +39,7 @@ class DownloadThread(QThread):
                 except Exception as e:
                     print(f"Failed to update {repo_name}: {e}")
             else:
+                # New repo - clone it fresh
                 try:
                     print(f"Attempting to clone {url} to {local_path}")
                     git.Repo.clone_from(url, local_path)
@@ -47,6 +47,7 @@ class DownloadThread(QThread):
                 except Exception as e:
                     print(f"Failed to clone {url}: {e}")
             
+            # Update the progress bar as we go
             self.progress.emit(int((i + 1) / len(self.repo_urls) * 100))
         
         print("Download thread finished")

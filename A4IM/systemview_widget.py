@@ -224,7 +224,7 @@ class SystemView(QWidget):
         # Right layout for module details and buttons
         right_layout = QVBoxLayout()
 
-# Module Title (initially hidden)
+        # Module Title (initially hidden)
         self.module_title = QLabel()
         self.module_title.setFont(QFont('Arial', 16, QFont.Bold))
         self.module_title.setStyleSheet("color: #465775; margin-bottom: 10px;")
