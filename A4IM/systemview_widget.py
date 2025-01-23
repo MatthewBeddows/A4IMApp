@@ -574,8 +574,10 @@ class SystemView(QWidget):
     def construct_module(self):
         if self.selected_node:
             repository_info = self.selected_node.data.get('repository', {})
+
             if repository_info and repository_info.get('docs_path'):
                 file_url = QUrl.fromLocalFile(os.path.abspath(repository_info['docs_path']))
+                
                 self.parent.show_git_building(
                     self.selected_node.name,
                     None,
