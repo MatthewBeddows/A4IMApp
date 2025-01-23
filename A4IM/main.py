@@ -85,12 +85,6 @@ class GitFileReaderApp(QMainWindow):
             if os.path.exists(architect_path):
                 with open(architect_path, 'r') as f:
                     content = f.read()
-                    # for line in content.split('\n'):
-                    #     if line.startswith('[module address]'):
-                    #         module_url = line.split('] ')[1].strip()
-                    #         module_name = module_url.split('/')[-1]
-                    #         module_path = os.path.join(architect_dir, module_name)
-                    #         git.Repo.clone_from(module_url, module_path)
                 
                 self.parse_project_architect(architect_path)
             else:
@@ -207,7 +201,7 @@ class GitFileReaderApp(QMainWindow):
                     submodule_addresses = []
                     lines = content.split('\n')
                     i = 0
-                    in_submodules_section = False
+                    in_requirements_section = False
                     while i < len(lines):
                         line = lines[i].strip()
                         if line.startswith('[Module Name]'):
@@ -219,15 +213,15 @@ class GitFileReaderApp(QMainWindow):
                             while i < len(lines) and not lines[i].startswith('['):
                                 module_description += ' ' + lines[i].strip()
                                 i += 1
-                        elif line.startswith('[Submodules]'):
-                            in_submodules_section = True
+                        elif line.startswith('[Requirements]'):
+                            in_requirements_section = True
                             i += 1
-                        elif in_submodules_section and line.startswith('[Module Address]'):
+                        elif in_requirements_section and line.startswith('[Module Address]'):
                             address = line.split('] ')[1].strip()
                             submodule_addresses.append(address)
                             i += 1
                         elif line.startswith('['):
-                            in_submodules_section = False
+                            in_requirements_section = False
                             i += 1
                         else:
                             i += 1
@@ -274,10 +268,12 @@ class GitFileReaderApp(QMainWindow):
         else:
             print(f"Progress update: {value}%")
 
-if __name__ == "__main__":
+def main():
     app = QApplication(sys.argv + ['--disable-seccomp-filter-sandbox'])
     selector = ArchitectSelector()
     selector.show()
-    sys.exit(app.exec_())
+    return app.exec_()
 
+if __name__ == "__main__":
+    sys.exit(main())
 
