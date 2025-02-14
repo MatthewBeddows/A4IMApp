@@ -1,5 +1,5 @@
 from PyQt5.QtWidgets import (
-    QWidget, QHBoxLayout, QVBoxLayout, QTextEdit, QPushButton, QLabel, QLineEdit, QCheckBox,
+    QDialog, QFormLayout, QComboBox, QDialogButtonBox, QWidget, QHBoxLayout, QVBoxLayout, QTextEdit, QPushButton, QLabel, QLineEdit, QCheckBox,
     QGraphicsView, QGraphicsScene, QGraphicsRectItem, QGraphicsTextItem,
     QGraphicsLineItem, QGraphicsItem, QGraphicsPixmapItem, QMessageBox, QApplication
 )
@@ -9,7 +9,62 @@ from PyQt5.QtCore import QUrl
 import math
 import os
 import re  # For regex operations to strip text in square brackets
+import git
+from collections import OrderedDict
 
+#class for creating modules
+class AddModuleDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Add New Module")
+        self.setup_ui()
+
+    def setup_ui(self):
+        layout = QFormLayout()
+        
+        # Module name input
+        self.name_input = QLineEdit()
+        layout.addRow("Module Name:", self.name_input)
+        
+        # Module description input
+        self.description_input = QTextEdit()
+        self.description_input.setMaximumHeight(100)
+        layout.addRow("Description:", self.description_input)
+        
+        # Repository address input
+        self.repo_input = QLineEdit()
+        self.repo_input.setPlaceholderText("https://github.com/username/repository")
+        layout.addRow("Repository URL:", self.repo_input)
+        
+        # Parent module selection
+        self.parent_select = QComboBox()
+        self.parent_select.addItem("Project Root")
+        layout.addRow("Parent Module:", self.parent_select)
+        
+        # Dialog buttons
+        button_box = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        )
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addRow(button_box)
+        
+        self.setLayout(layout)
+
+    def populate_parent_modules(self, modules):
+        self.parent_select.clear()
+        self.parent_select.addItem("Project Root")
+        for module_name in modules:
+            self.parent_select.addItem(module_name)
+
+    def get_module_data(self):
+        return {
+            'name': self.name_input.text().strip(),
+            'description': self.description_input.toPlainText().strip(),
+            'repository': {
+                'address': self.repo_input.text().strip()
+            }
+        }
 # NodeItem class for modules
 class NodeItem(QGraphicsRectItem):
     def __init__(self, name, data, system_view, node_type='module'):
@@ -218,6 +273,14 @@ class SystemView(QWidget):
         self.toggle_button.setFixedSize(100, 30)
         button_layout.addWidget(self.toggle_button)
 
+        # Add "Add Module" button next to Toggle All button in button_layout
+        self.add_module_button = QPushButton("Add Module")
+        self.add_module_button.setStyleSheet(self.get_button_style())
+        self.add_module_button.clicked.connect(self.show_add_module_dialog)
+        self.add_module_button.setToolTip("Add a new module to the system")
+        self.add_module_button.setFixedSize(100, 30)
+        button_layout.addWidget(self.add_module_button)
+
         graphics_layout.addLayout(button_layout)
         left_layout.addWidget(graphics_container)
 
@@ -235,6 +298,8 @@ class SystemView(QWidget):
         # Container for repo link and assigned user
         header_container = QHBoxLayout()
         header_container.setSpacing(20)  # Space between elements
+
+
 
         # Repository Link Label (initially hidden)
         self.repo_link = QLabel()
@@ -420,6 +485,159 @@ class SystemView(QWidget):
         self.node_items[node] = {'name': name, 'data': data}
 
         return node
+
+
+    def update_parent_module_info(self, parent_name, new_module_address):
+        """Update the parent module's moduleInfo.txt with the new module address"""
+        architect_dir = os.path.join("Downloaded Repositories", self.parent.architect_folder)
+        
+        # Find parent module's folder
+        parent_info = self.find_module_by_name(self.modules_data, parent_name)
+        if parent_info and 'repository' in parent_info:
+            parent_repo = parent_info['repository']['name']
+            parent_info_path = os.path.join(architect_dir, parent_repo, "moduleInfo.txt")
+            
+            if os.path.exists(parent_info_path):
+                # Read existing content
+                with open(parent_info_path, 'r', encoding='utf-8') as f:
+                    lines = f.readlines()
+                
+                # Find Requirements section and add new module
+                requirements_index = -1
+                for i, line in enumerate(lines):
+                    if line.strip() == "[Requirements]":
+                        requirements_index = i
+                        break
+                
+                if requirements_index != -1:
+                    # Add new module address after Requirements section
+                    lines.insert(requirements_index + 1, f"[Module Address] {new_module_address}\n")
+                    
+                    # Write back to file
+                    with open(parent_info_path, 'w', encoding='utf-8') as f:
+                        f.writelines(lines)
+
+
+    def show_add_module_dialog(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Add New Module")
+        
+        layout = QFormLayout()
+        
+        # Module name input
+        name_input = QLineEdit()
+        layout.addRow("Module Name:", name_input)
+        
+        # Module description input
+        description_input = QTextEdit()
+        description_input.setMaximumHeight(100)
+        layout.addRow("Description:", description_input)
+        
+        # Repository address input
+        repo_input = QLineEdit()
+        repo_input.setPlaceholderText("https://github.com/username/repository")
+        layout.addRow("Repository URL:", repo_input)
+        
+        # Parent module selection
+        parent_select = QComboBox()
+        parent_select.addItem("Project Root")
+        for module_name in self.modules_data:
+            parent_select.addItem(module_name)
+        layout.addRow("Parent Module:", parent_select)
+        
+        # Dialog buttons
+        button_box = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        )
+        button_box.accepted.connect(dialog.accept)
+        button_box.rejected.connect(dialog.reject)
+        layout.addRow(button_box)
+        
+        dialog.setLayout(layout)
+        
+        if dialog.exec_() == QDialog.Accepted:
+            try:
+                module_name = name_input.text().strip()
+                description = description_input.toPlainText().strip()
+                repo_url = repo_input.text().strip()
+                parent_name = parent_select.currentText()
+                
+                # Create module directory
+                architect_dir = os.path.join("Downloaded Repositories", self.parent.architect_folder)
+                repo_name = repo_url.split('/')[-1]
+                module_dir = os.path.join(architect_dir, repo_name)
+                os.makedirs(module_dir, exist_ok=True)
+                
+                # Create moduleInfo.txt
+                module_info_path = os.path.join(module_dir, "moduleInfo.txt")
+                with open(module_info_path, 'w', encoding='utf-8') as f:
+                    f.write(f"[Module Name] {module_name}\n")
+                    f.write(f"[Module Info] {description}\n")
+                    f.write("[Requirements]\n")
+                
+                # Update parent's moduleInfo.txt if this is a submodule
+                if parent_name != "Project Root":
+                    parent_info = self.find_module_by_name(self.modules_data, parent_name)
+                    if parent_info and 'repository' in parent_info:
+                        parent_repo = parent_info['repository']['name']
+                        parent_info_path = os.path.join(architect_dir, parent_repo, "moduleInfo.txt")
+                        
+                        if os.path.exists(parent_info_path):
+                            with open(parent_info_path, 'r', encoding='utf-8') as f:
+                                lines = f.readlines()
+                            
+                            requirements_index = -1
+                            for i, line in enumerate(lines):
+                                if line.strip() == "[Requirements]":
+                                    requirements_index = i
+                                    break
+                            
+                            if requirements_index != -1:
+                                lines.insert(requirements_index + 1, f"[Module Address] {repo_url}\n")
+                                
+                                with open(parent_info_path, 'w', encoding='utf-8') as f:
+                                    f.writelines(lines)
+                
+                # Update data structure
+                new_module = {
+                    'description': description,
+                    'submodules': OrderedDict(),
+                    'repository': {
+                        'name': repo_name,
+                        'address': repo_url,
+                        'docs_path': None
+                    }
+                }
+                
+                if parent_name == "Project Root":
+                    self.modules_data[module_name] = new_module
+                else:
+                    current = self.modules_data[parent_name]
+                    if 'submodules' not in current:
+                        current['submodules'] = OrderedDict()
+                    current['submodules'][module_name] = new_module
+                
+                # Refresh the view
+                self.populate_modules(self.modules_data)
+                
+                QMessageBox.information(self, "Success", f"Module '{module_name}' created successfully!")
+                
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to create module: {str(e)}")
+
+
+    def find_and_add_to_parent(self, modules, parent_name, new_module):
+        for name, module in modules.items():
+            if name == parent_name:
+                if 'submodules' not in module:
+                    module['submodules'] = {}
+                module['submodules'][new_module['name']] = new_module
+                return True
+            if 'submodules' in module:
+                if self.find_and_add_to_parent(module['submodules'], parent_name, new_module):
+                    return True
+        return False
+
 
     # Called when a node is clicked
     def node_clicked(self, node):
@@ -643,9 +861,52 @@ class SystemView(QWidget):
         clipboard = QApplication.clipboard()
         clipboard.setText(text)
 
+
+    def create_module_files(self, module_data, parent_name=None):
+        """Create the module folder and moduleInfo.txt file"""
+        architect_dir = os.path.join("Downloaded Repositories", self.parent.architect_folder)
+        
+        # Create repository name from the last part of the URL
+        repo_name = module_data['repository']['address'].split('/')[-1]
+        module_dir = os.path.join(architect_dir, repo_name)
+        
+        # Create module directory
+        os.makedirs(module_dir, exist_ok=True)
+        
+        # Create moduleInfo.txt
+        module_info_path = os.path.join(module_dir, "moduleInfo.txt")
+        with open(module_info_path, 'w', encoding='utf-8') as f:
+            f.write(f"[Module Name] {module_data['name']}\n")
+            f.write(f"[Module Info] {module_data['description']}\n")
+            f.write("[Requirements]\n")  # Start with empty requirements
+        
+        # Update parent's moduleInfo.txt if this is a submodule
+        if parent_name and parent_name != "Project Root":
+            self.update_parent_module_info(parent_name, module_data['repository']['address'])
+        
+        return module_dir
+
+    
+
+    def find_module_by_name(self, modules, target_name):
+        """Recursively find a module by name in the module hierarchy"""
+        for name, module in modules.items():
+            if name == target_name:
+                return module
+            if 'submodules' in module:
+                result = self.find_module_by_name(module['submodules'], target_name)
+                if result:
+                    return result
+        return None
+
+
+
     # Update node visibility (used when toggling)
     def update_node_visibility(self):
         for node in self.all_nodes:
             node.setVisible(True)
             for line in node.connected_lines:
                 line.setVisible(True)
+
+
+    
