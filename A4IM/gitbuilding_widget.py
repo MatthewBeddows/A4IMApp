@@ -254,7 +254,7 @@ class GitBuildingWindow(QWidget):
                         windows_path = windows_path.strip()
                         
                         if process.returncode == 0 and windows_path:
-                            windows_url = f"file:///{windows_path.replace('\\', '/')}"
+                            windows_url = "file:///" + windows_path.replace('\\', '/')
                             subprocess.run(['powershell.exe', '-Command', f'Start-Process "{windows_url}"'])
                         else:
                             raise Exception(f"Failed to convert path: {stderr}")
@@ -286,7 +286,7 @@ class GitBuildingWindow(QWidget):
                         windows_path = windows_path.strip()
                         
                         if process.returncode == 0 and windows_path:
-                            windows_url = f"file:///{windows_path.replace('\\', '/')}"
+                            windows_url = "file:///" + windows_path.replace('\\', '/')
                             subprocess.run(['powershell.exe', '-Command', f'Start-Process "{windows_url}"'])
                         else:
                             raise Exception(f"Failed to convert path: {stderr}")

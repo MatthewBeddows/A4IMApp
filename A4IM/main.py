@@ -11,6 +11,10 @@ from download_thread import DownloadThread
 from gitbuilding_setup import GitBuildingSetup
 from ArchitectSelector_widget import ArchitectSelector
 
+
+# Auto detect devices on the network
+# ethernet, usb connection
+
 class GitFileReaderApp(QMainWindow):
     def __init__(self, architect_url,architect_folder):
         super().__init__()
