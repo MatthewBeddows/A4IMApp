@@ -64,8 +64,10 @@ class GitFileReaderApp(QMainWindow):
         self.download_project_architect()
 
     def download_project_architect(self):
+        # Convert folder name to use underscores consistently
+        safe_folder = self.architect_folder.replace(" ", "_")
         download_dir = os.path.join(os.getcwd(), "Downloaded Repositories")
-        architect_dir = os.path.join(download_dir, self.architect_folder)
+        architect_dir = os.path.join(download_dir, safe_folder)
         clone_folder = os.path.join(architect_dir, "ProjectArchitect")
 
         if not os.path.exists(download_dir):
@@ -97,7 +99,6 @@ class GitFileReaderApp(QMainWindow):
             QMessageBox.critical(self, "Clone Error", f"Failed to clone repository: {str(e)}")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"An error occurred: {str(e)}")
-
 
     def run_git_building(self):
         self.git_building_runner.run()
@@ -177,7 +178,9 @@ class GitFileReaderApp(QMainWindow):
         self.download_modules(parent_module_path=None, module_addresses=cleaned_addresses)
 
     def parse_module_info(self, parent_module_path):
-        architect_dir = os.path.join("Downloaded Repositories", self.architect_folder)
+        safe_folder = self.architect_folder.replace(" ", "_")
+        architect_dir = os.path.join("Downloaded Repositories", safe_folder)
+        #architect_dir = os.path.join("Downloaded Repositories", self.architect_folder)
         
         if parent_module_path is None:
             architect_file = os.path.join(architect_dir, "ProjectArchitect", "architect.txt")
