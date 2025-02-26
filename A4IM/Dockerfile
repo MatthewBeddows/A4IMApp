@@ -14,6 +14,8 @@ RUN apt-get update && apt-get install -y \
     libgnutls30 \
     libssl1.1 \
     openssl \
+    libgit2-dev \
+    pkg-config \
     && add-apt-repository ppa:deadsnakes/ppa \
     && apt-get update \
     && apt-get install -y \
@@ -52,16 +54,17 @@ WORKDIR /app
 RUN python3.8 -m pip install \
     pyinstaller==4.5.1 \
     pyinstaller-hooks-contrib==2021.3 \
-    gitpython \
+    pygit2 \
     requests \
     beautifulsoup4 \
     PyQt5
 
-# Configure git to use HTTPS instead of GnuTLS
-RUN git config --global http.sslBackend openssl
-
 # Copy your application files
 COPY . /app
+
+# Make sure libgit2 is in the package
+RUN mkdir -p /app/dist/libs && \
+    cp /usr/lib/x86_64-linux-gnu/libgit2.so* /app/dist/libs/
 
 # Build command
 CMD ["python3.8", "-m", "PyInstaller", "spec_file.spec"]

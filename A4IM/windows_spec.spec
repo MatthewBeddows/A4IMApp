@@ -1,4 +1,3 @@
-# windows_spec.spec
 # -*- mode: python ; coding: utf-8 -*-
 
 import sys
@@ -6,59 +5,42 @@ from PyInstaller.utils.hooks import collect_all
 
 block_cipher = None
 
-# Collect all necessary files and data
-datas = []
 binaries = []
-hiddenimports = [
-    'PyQt5.sip',
-    'git',
-    'bs4',
-    'gitbuilding_widget',
-    'mainmenu_widget',
-    'systemview_widget',
-    'download_thread',
-    'gitbuilding_setup',
-    'ArchitectSelector_widget'
-]
-
-# Additional data files
-datas += [
-    ('gitbuilding_widget.py', '.'),
-    ('mainmenu_widget.py', '.'),
-    ('systemview_widget.py', '.'),
-    ('download_thread.py', '.'),
-    ('gitbuilding_setup.py', '.'),
-    ('ArchitectSelector_widget.py', '.')
-]
-
-# Collect PyQt5 data
-qt_collection = collect_all('PyQt5')
-datas.extend(qt_collection[0])
-binaries.extend(qt_collection[1])
-hiddenimports.extend(qt_collection[2])
-
-# Add additional imports
-hiddenimports.extend([
-    'git.cmd',
-    'git.refs',
-    'git.objects',
-    'git.repo',
-    'requests'
-])
+# Add the CFFI DLL explicitly
+if sys.platform.startswith('win'):
+    import _cffi_backend
+    binaries.append((_cffi_backend.__file__, '.'))
 
 a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=binaries,
-    datas=datas,
-    hiddenimports=hiddenimports,
+    datas=[
+        ('gitbuilding_widget.py', '.'),
+        ('mainmenu_widget.py', '.'),
+        ('systemview_widget.py', '.'),
+        ('download_thread.py', '.'),
+        ('gitbuilding_setup.py', '.'),
+        ('ArchitectSelector_widget.py', '.')
+    ],
+    hiddenimports=[
+        'PyQt5.sip',
+        'pygit2',
+        'bs4',
+        'soupsieve',
+        'cffi',
+        '_cffi_backend',
+        'gitbuilding_widget',
+        'mainmenu_widget',
+        'systemview_widget',
+        'download_thread',
+        'gitbuilding_setup',
+        'ArchitectSelector_widget'
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
     excludes=[],
-    win_no_prefer_redirects=False,
-    win_private_assemblies=False,
-    cipher=block_cipher,
     noarchive=False
 )
 
@@ -71,7 +53,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='GitFileReader.exe',
+    name='GitFileReader',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -79,5 +61,5 @@ exe = EXE(
     upx_exclude=[],
     runtime_tmpdir=None,
     console=True,
-    target_arch=None
+    target_platform='win64'
 )

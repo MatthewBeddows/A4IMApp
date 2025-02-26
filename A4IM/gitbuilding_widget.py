@@ -220,7 +220,9 @@ class GitBuildingWindow(QWidget):
                     soup = BeautifulSoup(html_content, 'html.parser')
                     
                     active_section = soup.find('li', class_='active')
-                    if active_section and (sub_nav := active_section.find('ul', class_='sub-nav-list')):
+                    sub_nav = active_section.find('ul', class_='sub-nav-list') if active_section else None
+                    
+                    if active_section and sub_nav:
                         for i in reversed(range(self.tasks_container_layout.count())):
                             widget = self.tasks_container_layout.itemAt(i).widget()
                             if isinstance(widget, TaskItem):

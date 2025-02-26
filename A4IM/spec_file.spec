@@ -11,9 +11,9 @@ datas = []
 binaries = []
 hiddenimports = [
     'PyQt5.sip',
-    'git',
     'bs4',  # BeautifulSoup4
     'soupsieve',  # Required by bs4
+    'pygit2',  # Added for libgit2 support
     # Local modules
     'gitbuilding_widget',
     'mainmenu_widget',
@@ -22,6 +22,11 @@ hiddenimports = [
     'gitbuilding_setup',
     'ArchitectSelector_widget'
 ]
+
+# Add libgit2 libraries
+binaries.extend([
+    ('/usr/lib/x86_64-linux-gnu/libgit2.so.26', '.'),
+])
 
 # Additional data files
 datas += [

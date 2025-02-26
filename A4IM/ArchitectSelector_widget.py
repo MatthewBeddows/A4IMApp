@@ -1,6 +1,6 @@
 import sys
 import os
-import git
+import pygit2
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                             QListWidget, QPushButton, QLabel, QMessageBox)
 import requests

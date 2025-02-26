@@ -9,7 +9,7 @@ from PyQt5.QtCore import QUrl
 import math
 import os
 import re  # For regex operations to strip text in square brackets
-import git
+import pygit2
 from collections import OrderedDict
 
 #class for creating modules
