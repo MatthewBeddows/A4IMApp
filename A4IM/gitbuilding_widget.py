@@ -317,4 +317,4 @@ class GitBuildingWindow(QWidget):
 
     def go_back(self):
         if self.parent and hasattr(self.parent, 'central_widget'):
-            self.parent.central_widget.setCurrentIndex(0)
+            self.parent.central_widget.setCurrentIndex(1)
