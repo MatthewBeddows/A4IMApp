@@ -159,9 +159,13 @@ class GitFileReaderApp(QMainWindow):
         with open(architect_path, "r") as f:
             content = f.read()
             
-        module_addresses = [line.split("] ")[1].strip() 
-                          for line in content.split("\n") 
-                          if line.startswith("[module address]")]
+        module_addresses = []
+        for line in content.split("\n"):
+            if line.lower().startswith("[module address]"):
+                parts = line.split("]", 1)
+                if len(parts) > 1:
+                    address = parts[1].strip()
+                    module_addresses.append(address)
 
         cleaned_addresses = []
         for address in module_addresses:
@@ -182,9 +186,14 @@ class GitFileReaderApp(QMainWindow):
             architect_file = os.path.join(architect_dir, "ProjectArchitect", "architect.txt")
             with open(architect_file, "r") as f:
                 content = f.read()
-            module_addresses = [line.split("] ")[1].strip() 
-                            for line in content.split("\n") 
-                            if line.startswith("[module address]")]
+            
+            module_addresses = []
+            for line in content.split("\n"):
+                if line.lower().startswith("[module address]"):
+                    parts = line.split("]", 1)
+                    if len(parts) > 1:
+                        address = parts[1].strip()
+                        module_addresses.append(address)
         else:
             current_module = self.modules
             for name in parent_module_path:
@@ -207,27 +216,35 @@ class GitFileReaderApp(QMainWindow):
                     in_requirements_section = False
                     while i < len(lines):
                         line = lines[i].strip()
-                        if line.startswith('[Module Name]'):
-                            module_name = line[len('[Module Name]'):].strip()
+                        if line.lower().startswith('[module name]'):
+                            module_name = line.split(']', 1)[1].strip()
                             i += 1
-                        elif line.startswith('[Module Info]'):
-                            module_description = line[len('[Module Info]'):].strip()
+                        elif line.lower().startswith('[module info]'):
+                            module_description = line.split(']', 1)[1].strip()
                             i += 1
                             while i < len(lines) and not lines[i].startswith('['):
                                 module_description += ' ' + lines[i].strip()
                                 i += 1
-                        elif line.startswith('[Requirements]'):
+                        elif line.lower().startswith('[requirements]'):
                             in_requirements_section = True
                             i += 1
-                        elif in_requirements_section and line.startswith('[Module Address]'):
-                            address = line.split('] ')[1].strip()
-                            submodule_addresses.append(address)
+                        # Check for module address with case insensitivity
+                        elif line.lower().startswith('[module address]'):
+                            parts = line.split(']', 1)
+                            if len(parts) > 1:
+                                address = parts[1].strip()
+                                submodule_addresses.append(address)
                             i += 1
                         elif line.startswith('['):
                             in_requirements_section = False
                             i += 1
                         else:
                             i += 1
+
+                    # Debug output for submodule addresses
+                    print(f"Found {len(submodule_addresses)} submodule addresses for {repo_name}")
+                    for addr in submodule_addresses:
+                        print(f"  - {addr}")
 
                     if module_name is None:
                         print(f"Module name not found in {module_info_path}")
@@ -264,7 +281,7 @@ class GitFileReaderApp(QMainWindow):
                         self.download_modules(current_module_path, submodule_addresses)
             else:
                 print(f"moduleInfo.txt not found for repository: {repo_name}")
-    
+        
     def update_progress(self, value):
         if self.progress_bar is not None:
             self.progress_bar.setValue(value)

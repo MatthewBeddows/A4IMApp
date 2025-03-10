@@ -271,7 +271,7 @@ class SystemView(QWidget):
         self.toggle_button.clicked.connect(self.toggle_modules)
         self.toggle_button.setToolTip("Toggle visibility of child modules")
         self.toggle_button.setFixedSize(100, 30)
-        button_layout.addWidget(self.toggle_button)
+        #button_layout.addWidget(self.toggle_button) re-add at a later date
 
         # Add "Add Module" button next to Toggle All button in button_layout
         self.add_module_button = QPushButton("Add Module")
