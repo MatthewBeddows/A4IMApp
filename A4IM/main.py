@@ -250,7 +250,7 @@ class GitFileReaderApp(QMainWindow):
                         print(f"Module name not found in {module_info_path}")
                         continue
 
-                    docs_path = os.path.join(architect_dir, repo_name, "docs", "index.html")
+                    docs_path = os.path.join(architect_dir, repo_name, "orshards", "index.html")
                     has_docs = os.path.exists(docs_path)
 
                     module_data = {

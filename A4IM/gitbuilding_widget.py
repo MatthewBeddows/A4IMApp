@@ -176,8 +176,8 @@ class GitBuildingWindow(QWidget):
         self.current_base_path = base_path
 
         # Process test information
-        docs_dir = os.path.dirname(base_path)
-        repo_dir = os.path.dirname(docs_dir)
+        orshards_dir = os.path.dirname(base_path)
+        repo_dir = os.path.dirname(orshards_dir)
         tests_dir = os.path.join(repo_dir, 'tests')
         tests_info_path = os.path.join(tests_dir, 'TestsInfo.txt')
         
@@ -207,10 +207,10 @@ class GitBuildingWindow(QWidget):
 
         # Load GitBuilding content
         path_parts = base_path.split('/')
-        if 'docs' in path_parts:
-            docs_index = path_parts.index('docs')
-            docs_path = '/' + '/'.join(path_parts[:docs_index + 1])
-            gitbuilding_path = os.path.join(docs_path, 'GitBuilding', 'index.html')
+        if 'orshards' in path_parts:
+            orshards_index = path_parts.index('orshards')
+            orshards_path = '/' + '/'.join(path_parts[:orshards_index + 1])
+            gitbuilding_path = os.path.join(orshards_path, 'GitBuilding', 'index.html')
             
             if os.path.exists(gitbuilding_path):
                 try:
@@ -237,13 +237,14 @@ class GitBuildingWindow(QWidget):
                 except Exception as e:
                     print(f"Error loading content: {str(e)}")
 
+
     def open_task(self, href):
         if href and self.current_base_path:
             path_parts = self.current_base_path.split('/')
-            if 'docs' in path_parts:
-                docs_index = path_parts.index('docs')
-                docs_path = '/' + '/'.join(path_parts[:docs_index + 1])
-                file_path = os.path.join(docs_path, 'GitBuilding', href)
+            if 'orshards' in path_parts:
+                orshards_index = path_parts.index('orshards')
+                orshards_path = '/' + '/'.join(path_parts[:orshards_index + 1])
+                file_path = os.path.join(orshards_path, 'GitBuilding', href)
                 
                 if os.path.exists(file_path):
                     try:
@@ -272,10 +273,10 @@ class GitBuildingWindow(QWidget):
     def open_documentation(self):
         if self.current_base_path:
             path_parts = self.current_base_path.split('/')
-            if 'docs' in path_parts:
-                docs_index = path_parts.index('docs')
-                docs_path = '/' + '/'.join(path_parts[:docs_index + 1])
-                gitbuilding_path = os.path.join(docs_path, 'GitBuilding', 'index.html')
+            if 'orshards' in path_parts:
+                orshards_index = path_parts.index('orshards')
+                orshards_path = '/' + '/'.join(path_parts[:orshards_index + 1])
+                gitbuilding_path = os.path.join(orshards_path, 'GitBuilding', 'index.html')
                 
                 if os.path.exists(gitbuilding_path):
                     try:
@@ -300,7 +301,6 @@ class GitBuildingWindow(QWidget):
                         msg.setInformativeText(gitbuilding_path)
                         msg.setStandardButtons(QMessageBox.Ok)
                         msg.exec_()
-
     def run_test(self):
         if self.test_script_path and os.path.exists(self.test_script_path):
             process = subprocess.Popen([sys.executable, self.test_script_path],
