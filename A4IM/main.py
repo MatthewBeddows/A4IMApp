@@ -9,22 +9,17 @@ from gitbuilding_widget import GitBuildingWindow
 from systemview_widget import SystemView
 from download_thread import DownloadThread
 from gitbuilding_setup import GitBuildingSetup
-from ArchitectSelector_widget import ArchitectSelector
-
-
-# Auto detect devices on the network
-# ethernet, usb connection
+from RepositorySelector_widget import RepositorySelector
 
 class GitFileReaderApp(QMainWindow):
-    def __init__(self, architect_url,architect_folder):
+    def __init__(self, initial_repo_url, repo_folder):
         super().__init__()
         self.setWindowTitle("Git File Reader")
         self.setGeometry(100, 100, 800, 600)
 
-        # Store the selected architect URL
-        self.architect_url = architect_url
-        self.architect_folder = architect_folder
-
+        # Store the initial repository URL
+        self.initial_repo_url = initial_repo_url
+        self.repo_folder = repo_folder
 
         # Central widget setup
         self.central_widget = QStackedWidget()
@@ -60,43 +55,46 @@ class GitFileReaderApp(QMainWindow):
         # Keep track of active threads
         self.active_threads = []
 
-        # Start downloading the project architect
-        self.download_project_architect()
+        # Start downloading the initial repository
+        self.download_initial_repository()
 
-    def download_project_architect(self):
+    def download_initial_repository(self):
         download_dir = os.path.join(os.getcwd(), "Downloaded Repositories")
-        architect_dir = os.path.join(download_dir, self.architect_folder)
-        clone_folder = os.path.join(architect_dir, "ProjectArchitect")
+        repo_dir = os.path.join(download_dir, self.repo_folder)
+        clone_folder = os.path.join(repo_dir, "RootModule")
 
         if not os.path.exists(download_dir):
             os.makedirs(download_dir)
-        if not os.path.exists(architect_dir):
-            os.makedirs(architect_dir)
+        if not os.path.exists(repo_dir):
+            os.makedirs(repo_dir)
 
-        if os.path.exists(architect_dir):
+        # Clear existing directory if it exists
+        if os.path.exists(repo_dir):
             import shutil
-            shutil.rmtree(architect_dir)
-            os.makedirs(architect_dir)
+            shutil.rmtree(repo_dir)
+            os.makedirs(repo_dir)
 
         try:
             import pygit2
-            # Clone with pygit2
+            print(f"Cloning initial repository: {self.initial_repo_url}")
             pygit2.clone_repository(
-                self.architect_url,
+                self.initial_repo_url,
                 clone_folder
             )
             
-            architect_path = os.path.join(clone_folder, "architect.txt")
-            if os.path.exists(architect_path):
-                with open(architect_path, 'r') as f:
-                    content = f.read()
-                
-                self.parse_project_architect(architect_path)
+            # Look for ModuleInfo.txt file with case-insensitive comparison
+            module_info_path = None
+            for filename in os.listdir(clone_folder):
+                if filename.lower() == "moduleinfo.txt":
+                    module_info_path = os.path.join(clone_folder, filename)
+                    break
+                    
+            if module_info_path and os.path.exists(module_info_path):
+                self.parse_initial_module(module_info_path)
             else:
-                QMessageBox.critical(self, "File Error", "architect.txt not found in cloned repository.")
+                QMessageBox.critical(self, "File Error", "ModuleInfo.txt not found in the repository.")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"An error occurred: {str(e)}")
-
 
     def run_git_building(self):
         self.git_building_runner.run()
@@ -113,11 +111,13 @@ class GitFileReaderApp(QMainWindow):
         self.central_widget.setCurrentWidget(self.system_view)
     
     def show_git_building(self, module, submodule, url):
+        """Load a specific repository URL in the git building view"""
+        print(f"Showing Git Building for module: {module}, submodule: {submodule}, URL: {url}")
         self.git_building.load_url(url)
         self.central_widget.setCurrentWidget(self.git_building)
 
     def download_modules(self, parent_module_path, module_addresses):
-        self.pending_downloads += 1
+        self.pending_downloads += len(module_addresses)
         
         if self.progress_bar is None:
             self.progress_bar = QProgressBar(self)
@@ -132,20 +132,27 @@ class GitFileReaderApp(QMainWindow):
             self.progress_bar.setAlignment(Qt.AlignCenter)
             self.main_menu.layout().addWidget(self.progress_bar)
         
-        download_thread = DownloadThread(module_addresses, self.architect_folder)
+        download_thread = DownloadThread(module_addresses, self.repo_folder)
         download_thread.progress.connect(self.update_progress)
         download_thread.finished.connect(lambda: self.module_download_finished(parent_module_path, download_thread))
         download_thread.start()
         self.active_threads.append(download_thread)
 
     def module_download_finished(self, parent_module_path, thread):
+        """Handle completion of module downloads"""
         if thread in self.active_threads:
             self.active_threads.remove(thread)
 
         self.pending_downloads -= 1
-        self.parse_module_info(parent_module_path)
+        print(f"Download finished. Remaining downloads: {self.pending_downloads}")
         
-        if self.pending_downloads == 0:
+        # Process the downloaded modules
+        if parent_module_path:
+            self.parse_module_info(parent_module_path)
+        
+        # Add a timeout check to ensure we eventually complete
+        if self.pending_downloads <= 0 or not self.active_threads:
+            print("All downloads complete or no active threads remaining!")
             if self.progress_bar:
                 self.progress_bar.setParent(None)
                 self.progress_bar.deleteLater()
@@ -155,145 +162,209 @@ class GitFileReaderApp(QMainWindow):
             self.main_menu.show()
             self.show_main_menu()
 
-    def parse_project_architect(self, architect_path):
-        with open(architect_path, "r") as f:
+    def parse_initial_module(self, module_info_path):
+        """Parse the initial ModuleInfo.txt file and start the download process"""
+        with open(module_info_path, 'r') as f:
             content = f.read()
-            
-        module_addresses = []
-        for line in content.split("\n"):
-            if line.lower().startswith("[module address]"):
-                parts = line.split("]", 1)
+        
+        module_name = None
+        module_description = ""
+        submodule_addresses = []
+        
+        lines = content.split('\n')
+        i = 0
+        while i < len(lines):
+            line = lines[i].strip()
+            if line.lower().startswith('[module name]'):
+                module_name = line.split(']', 1)[1].strip()
+                i += 1
+            elif line.lower().startswith('[module info]'):
+                module_description = line.split(']', 1)[1].strip()
+                i += 1
+                while i < len(lines) and not lines[i].startswith('['):
+                    module_description += ' ' + lines[i].strip()
+                    i += 1
+            elif line.lower().startswith('[module address]'):
+                parts = line.split(']', 1)
                 if len(parts) > 1:
                     address = parts[1].strip()
-                    module_addresses.append(address)
-
+                    submodule_addresses.append(address)
+                i += 1
+            else:
+                i += 1
+        
+        if not module_name:
+            module_name = "Root Module"  # Default name if not found
+        
+        # Clean up addresses if needed
         cleaned_addresses = []
-        for address in module_addresses:
+        for address in submodule_addresses:
             if address.count("https://") > 1:
                 address = address.replace("https://", "", address.count("https://") - 1)
             if address.count("github.com") > 1:
                 address = address.replace("github.com/", "", address.count("github.com") - 1)
-            cleaned_addresses.append(address)
+            cleaned_addresses.append(address)  # Fixed: using 'address' instead of 'addr'
         
-        self.loading_complete = False
-        self.pending_downloads = 0
-        self.download_modules(parent_module_path=None, module_addresses=cleaned_addresses)
+        # Create the root module entry
+        repo_name = self.initial_repo_url.split('/')[-1]
+        docs_path = os.path.join("Downloaded Repositories", self.repo_folder, "RootModule", "orshards", "index.html")
+        has_docs = os.path.exists(docs_path)
+        
+        # Initialize modules dictionary with the root module
+        self.modules = OrderedDict()
+        self.modules[module_name] = {
+            'description': module_description.strip(),
+            'submodules': OrderedDict(),
+            'submodule_addresses': cleaned_addresses,
+            'repository': {
+                'name': repo_name,
+                'address': self.initial_repo_url,
+                'docs_path': docs_path if has_docs else None
+            }
+        }
+        self.module_order.append(module_name)
+        
+        print(f"Initial module '{module_name}' created with {len(cleaned_addresses)} submodule addresses")
+        
+        # Start downloading submodules if any
+        if cleaned_addresses:
+            print(f"Root module has submodules: {cleaned_addresses}")
+            self.loading_complete = False
+            self.pending_downloads = 0
+            self.download_modules(parent_module_path=[module_name], module_addresses=cleaned_addresses)
+        else:
+            print("No submodules found for root module. Loading main menu...")
+            self.loading_complete = True
+            self.main_menu.show()
+            self.show_main_menu()
 
     def parse_module_info(self, parent_module_path):
-        architect_dir = os.path.join("Downloaded Repositories", self.architect_folder)
+        """Parse ModuleInfo.txt files from downloaded submodules"""
+        if not parent_module_path:
+            return
         
-        if parent_module_path is None:
-            architect_file = os.path.join(architect_dir, "ProjectArchitect", "architect.txt")
-            with open(architect_file, "r") as f:
-                content = f.read()
+        # Navigate to the parent module
+        current = self.modules
+        for name in parent_module_path[:-1]:  # All but the last element
+            if name in current:
+                if 'submodules' in current[name]:
+                    current = current[name]['submodules']
+                else:
+                    current[name]['submodules'] = OrderedDict()
+                    current = current[name]['submodules']
+            else:
+                print(f"Error: Parent path not found: {name}")
+                return
+        
+        # Get the parent module
+        parent_name = parent_module_path[-1]
+        if parent_name not in current:
+            print(f"Error: Parent module not found: {parent_name}")
+            return
+        
+        parent_module = current[parent_name]
+        
+        # Get the submodule addresses
+        addresses = parent_module.get('submodule_addresses', [])
+        repo_dir = os.path.join("Downloaded Repositories", self.repo_folder)
+        
+        # Make sure parent has submodules container
+        if 'submodules' not in parent_module:
+            parent_module['submodules'] = OrderedDict()
+        
+        for address in addresses:
+            repo_name = address.split('/')[-1]
+            repo_path = os.path.join(repo_dir, repo_name)
             
-            module_addresses = []
-            for line in content.split("\n"):
-                if line.lower().startswith("[module address]"):
-                    parts = line.split("]", 1)
-                    if len(parts) > 1:
-                        address = parts[1].strip()
-                        module_addresses.append(address)
-        else:
-            current_module = self.modules
-            for name in parent_module_path:
-                current_module = current_module[name]
-            module_addresses = current_module.get('submodule_addresses', [])
-
-        for module_address in module_addresses:
-            repo_name = module_address.split('/')[-1]
-            module_info_path = os.path.join(architect_dir, repo_name, "moduleInfo.txt")
+            # Find ModuleInfo.txt
+            module_info_path = None
+            if os.path.exists(repo_path):
+                for filename in os.listdir(repo_path):
+                    if filename.lower() == "moduleinfo.txt":
+                        module_info_path = os.path.join(repo_path, filename)
+                        break
             
-            if os.path.exists(module_info_path):
+            if module_info_path and os.path.exists(module_info_path):
+                # Parse the module info
                 with open(module_info_path, 'r') as f:
                     content = f.read()
-
-                    module_name = None
-                    module_description = ""
-                    submodule_addresses = []
-                    lines = content.split('\n')
-                    i = 0
-                    in_requirements_section = False
-                    while i < len(lines):
-                        line = lines[i].strip()
-                        if line.lower().startswith('[module name]'):
-                            module_name = line.split(']', 1)[1].strip()
+                
+                module_name = None
+                module_description = ""
+                module_addresses = []
+                
+                lines = content.split('\n')
+                i = 0
+                while i < len(lines):
+                    line = lines[i].strip()
+                    if line.lower().startswith('[module name]'):
+                        module_name = line.split(']', 1)[1].strip()
+                        i += 1
+                    elif line.lower().startswith('[module info]'):
+                        module_description = line.split(']', 1)[1].strip()
+                        i += 1
+                        while i < len(lines) and not lines[i].startswith('['):
+                            module_description += ' ' + lines[i].strip()
                             i += 1
-                        elif line.lower().startswith('[module info]'):
-                            module_description = line.split(']', 1)[1].strip()
-                            i += 1
-                            while i < len(lines) and not lines[i].startswith('['):
-                                module_description += ' ' + lines[i].strip()
-                                i += 1
-                        elif line.lower().startswith('[requirements]'):
-                            in_requirements_section = True
-                            i += 1
-                        # Check for module address with case insensitivity
-                        elif line.lower().startswith('[module address]'):
-                            parts = line.split(']', 1)
-                            if len(parts) > 1:
-                                address = parts[1].strip()
-                                submodule_addresses.append(address)
-                            i += 1
-                        elif line.startswith('['):
-                            in_requirements_section = False
-                            i += 1
-                        else:
-                            i += 1
-
-                    # Debug output for submodule addresses
-                    print(f"Found {len(submodule_addresses)} submodule addresses for {repo_name}")
-                    for addr in submodule_addresses:
-                        print(f"  - {addr}")
-
-                    if module_name is None:
-                        print(f"Module name not found in {module_info_path}")
-                        continue
-
-                    docs_path = os.path.join(architect_dir, repo_name, "orshards", "index.html")
-                    has_docs = os.path.exists(docs_path)
-
-                    module_data = {
-                        'description': module_description.strip(),
-                        'submodules': OrderedDict(),
-                        'submodule_addresses': submodule_addresses,
-                        'repository': {
-                            'name': repo_name,
-                            'address': module_address,
-                            'docs_path': docs_path if has_docs else None
-                        }
-                    }
-
-                    if parent_module_path is None:
-                        self.modules[module_name] = module_data
-                        self.module_order.append(module_name)
+                    elif line.lower().startswith('[module address]'):
+                        parts = line.split(']', 1)
+                        if len(parts) > 1:
+                            addr = parts[1].strip()
+                            module_addresses.append(addr)
+                        i += 1
                     else:
-                        current_module = self.modules
-                        for module_name_in_path in parent_module_path:
-                            current_module = current_module[module_name_in_path]
-                            if 'submodules' not in current_module:
-                                current_module['submodules'] = OrderedDict()
-                        current_module['submodules'][module_name] = module_data
+                        i += 1
+                
+                if not module_name:
+                    module_name = repo_name
+                
+                # Clean up addresses
+                cleaned_addresses = []
+                for addr in module_addresses:
+                    if addr.count("https://") > 1:
+                        addr = addr.replace("https://", "", addr.count("https://") - 1)
+                    if addr.count("github.com") > 1:
+                        addr = addr.replace("github.com/", "", addr.count("github.com") - 1)
+                    cleaned_addresses.append(addr)
+                
+                # Check for documentation
+                docs_path = os.path.join(repo_path, "orshards", "index.html")
+                has_docs = os.path.exists(docs_path)
+                
+                # Add the module
+                parent_module['submodules'][module_name] = {
+                    'description': module_description.strip(),
+                    'submodules': OrderedDict(),
+                    'submodule_addresses': cleaned_addresses,
+                    'repository': {
+                        'name': repo_name,
+                        'address': address,
+                        'docs_path': docs_path if has_docs else None
+                    }
+                }
+                
+                print(f"Added module {module_name} to {parent_name}")
+                
+                # Download submodules if any
+                if cleaned_addresses:
+                    new_path = parent_module_path.copy()
+                    new_path.append(module_name)
+                    self.download_modules(new_path, cleaned_addresses)
 
-                    if submodule_addresses:
-                        current_module_path = parent_module_path.copy() if parent_module_path else []
-                        current_module_path.append(module_name)
-                        self.download_modules(current_module_path, submodule_addresses)
-            else:
-                print(f"moduleInfo.txt not found for repository: {repo_name}")
-        
     def update_progress(self, value):
-        if self.progress_bar is not None:
+        """Update the progress bar with the current value"""
+        if self.progress_bar:
             self.progress_bar.setValue(value)
         else:
-            print(f"Progress update: {value}%")
+            print(f"Progress: {value}%")
 
 def main():
     app = QApplication(sys.argv + ['--disable-seccomp-filter-sandbox'])
-    selector = ArchitectSelector()
+    # Import here to avoid circular imports
+    from RepositorySelector_widget import RepositorySelector
+    selector = RepositorySelector()
     selector.show()
     return app.exec_()
 
 if __name__ == "__main__":
     sys.exit(main())
-
