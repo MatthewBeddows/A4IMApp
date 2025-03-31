@@ -68,33 +68,60 @@ class GitFileReaderApp(QMainWindow):
         if not os.path.exists(repo_dir):
             os.makedirs(repo_dir)
 
-        # Clear existing directory if it exists
-        if os.path.exists(repo_dir):
-            import shutil
-            shutil.rmtree(repo_dir)
-            os.makedirs(repo_dir)
-
-        try:
-            import pygit2
-            print(f"Cloning initial repository: {self.initial_repo_url}")
-            pygit2.clone_repository(
-                self.initial_repo_url,
-                clone_folder
-            )
-            
-            # Look for ModuleInfo.txt file with case-insensitive comparison
-            module_info_path = None
+        # Check if repository already exists
+        module_info_path = None
+        if os.path.exists(clone_folder) and os.path.isdir(clone_folder):
+            # Check if it contains ModuleInfo.txt
             for filename in os.listdir(clone_folder):
                 if filename.lower() == "moduleinfo.txt":
                     module_info_path = os.path.join(clone_folder, filename)
+                    print(f"Initial repository already exists, skipping download")
                     break
+
+        # If not found, clone the repository
+        if not module_info_path:
+            try:
+                # Clear existing directory if it exists
+                if os.path.exists(repo_dir):
+                    import shutil
+                    shutil.rmtree(repo_dir)
+                    os.makedirs(repo_dir)
                     
-            if module_info_path and os.path.exists(module_info_path):
-                self.parse_initial_module(module_info_path)
-            else:
-                QMessageBox.critical(self, "File Error", "ModuleInfo.txt not found in the repository.")
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"An error occurred: {str(e)}")
+                import pygit2
+                print(f"Cloning initial repository: {self.initial_repo_url}")
+                pygit2.clone_repository(
+                    self.initial_repo_url,
+                    clone_folder
+                )
+                
+                # Look for ModuleInfo.txt file with case-insensitive comparison
+                for filename in os.listdir(clone_folder):
+                    if filename.lower() == "moduleinfo.txt":
+                        module_info_path = os.path.join(clone_folder, filename)
+                        break
+                        
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"An error occurred: {str(e)}")
+                return
+
+        if module_info_path and os.path.exists(module_info_path):
+            self.parse_initial_module(module_info_path)
+        else:
+            QMessageBox.critical(self, "File Error", "ModuleInfo.txt not found in the repository.")
+
+
+    def check_if_all_complete(self):
+        """Check if all downloads are complete"""
+        if self.pending_downloads <= 0:
+            print("All downloads complete! Loading main menu...")
+            if self.progress_bar:
+                self.progress_bar.setParent(None)
+                self.progress_bar.deleteLater()
+                self.progress_bar = None
+            
+            self.loading_complete = True
+            self.main_menu.show()
+            self.show_main_menu()
 
     def run_git_building(self):
         self.git_building_runner.run()
@@ -117,7 +144,43 @@ class GitFileReaderApp(QMainWindow):
         self.central_widget.setCurrentWidget(self.git_building)
 
     def download_modules(self, parent_module_path, module_addresses):
-        self.pending_downloads += len(module_addresses)
+        # Check which repositories actually need to be downloaded
+        new_addresses = []
+        repo_dir = os.path.join("Downloaded Repositories", self.repo_folder)
+        
+        for address in module_addresses:
+            repo_name = address.split('/')[-1]
+            repo_path = os.path.join(repo_dir, repo_name)
+            
+            # If repo directory already exists and contains the expected files, skip downloading
+            if os.path.exists(repo_path) and os.path.isdir(repo_path):
+                # Check if it has a .git directory (indicating it's a valid repo)
+                if os.path.exists(os.path.join(repo_path, ".git")):
+                    # Check if it has ModuleInfo.txt
+                    module_info_exists = False
+                    for filename in os.listdir(repo_path):
+                        if filename.lower() == "moduleinfo.txt":
+                            module_info_exists = True
+                            break
+                    
+                    if module_info_exists:
+                        print(f"Repository already exists, skipping download: {repo_name}")
+                        continue
+            
+            # If we got here, we need to download this repo
+            new_addresses.append(address)
+        
+        # If nothing to download, process the modules and return
+        if not new_addresses:
+            print("All repositories already exist, skipping downloads")
+            self.parse_module_info(parent_module_path)
+            
+            # Check if we're all done
+            self.check_if_all_complete()
+            return
+        
+        # Continue with downloading the new repositories
+        self.pending_downloads += len(new_addresses)
         
         if self.progress_bar is None:
             self.progress_bar = QProgressBar(self)
@@ -132,7 +195,7 @@ class GitFileReaderApp(QMainWindow):
             self.progress_bar.setAlignment(Qt.AlignCenter)
             self.main_menu.layout().addWidget(self.progress_bar)
         
-        download_thread = DownloadThread(module_addresses, self.repo_folder)
+        download_thread = DownloadThread(new_addresses, self.repo_folder)
         download_thread.progress.connect(self.update_progress)
         download_thread.finished.connect(lambda: self.module_download_finished(parent_module_path, download_thread))
         download_thread.start()
@@ -150,17 +213,8 @@ class GitFileReaderApp(QMainWindow):
         if parent_module_path:
             self.parse_module_info(parent_module_path)
         
-        # Add a timeout check to ensure we eventually complete
-        if self.pending_downloads <= 0 or not self.active_threads:
-            print("All downloads complete or no active threads remaining!")
-            if self.progress_bar:
-                self.progress_bar.setParent(None)
-                self.progress_bar.deleteLater()
-                self.progress_bar = None
-            
-            self.loading_complete = True
-            self.main_menu.show()
-            self.show_main_menu()
+        # Check if we're done
+        self.check_if_all_complete()
 
     def parse_initial_module(self, module_info_path):
         """Parse the initial ModuleInfo.txt file and start the download process"""
