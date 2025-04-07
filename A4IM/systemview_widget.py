@@ -10,6 +10,7 @@ import math
 import os
 import re  # For regex operations to strip text in square brackets
 import pygit2
+import subprocess
 from collections import OrderedDict
 
 #class for creating modules
@@ -264,6 +265,14 @@ class SystemView(QWidget):
         reset_view_button.setToolTip("Reset the view to the default position and zoom level")
         reset_view_button.setFixedSize(100, 30)
         button_layout.addWidget(reset_view_button)
+
+        # Add Open Folder button
+        open_folder_button = QPushButton("Open Folder")
+        open_folder_button.setStyleSheet(self.get_button_style())
+        open_folder_button.clicked.connect(self.open_project_folder)
+        open_folder_button.setToolTip("Open the project folder in file explorer")
+        open_folder_button.setFixedSize(100, 30)
+        button_layout.addWidget(open_folder_button)
 
         # Toggle All button
         self.toggle_button = QPushButton("Toggle All")
@@ -828,6 +837,54 @@ class SystemView(QWidget):
                 for line in n.connected_lines:
                     line.setVisible(n.isVisible())
 
+    def open_project_folder(self):
+        """Open the project folder in the system file explorer - WSL compatible"""
+        try:
+            repo_dir = os.path.join(os.getcwd(), "Downloaded Repositories", self.parent.repo_folder)
+            
+            if not os.path.exists(repo_dir):
+                QMessageBox.warning(self, "Folder Not Found", "Project folder does not exist.")
+                return
+            
+            # Check for WSL
+            is_wsl = False
+            try:
+                with open('/proc/version', 'r') as f:
+                    if 'microsoft' in f.read().lower():
+                        is_wsl = True
+            except:
+                pass
+                
+            if is_wsl:
+                # For WSL, convert path to Windows format and use explorer.exe
+                try:
+                    # Get Windows path using wslpath
+                    process = subprocess.run(['wslpath', '-w', repo_dir], 
+                                            capture_output=True, text=True, check=True)
+                    windows_path = process.stdout.strip()
+                    
+                    # Use Windows explorer to open the folder
+                    subprocess.run(['explorer.exe', windows_path])
+                except Exception as e:
+                    # Try powershell.exe as a fallback
+                    try:
+                        subprocess.run(['powershell.exe', 'start', repo_dir])
+                    except:
+                        QMessageBox.information(self, "Folder Path", 
+                                            f"Your project folder is located at:\n{repo_dir}")
+            else:
+                # Standard Linux/Unix/Mac handling
+                import platform
+                if platform.system() == "Windows":
+                    subprocess.run(['explorer', repo_dir])
+                else:
+                    # Show dialog with path - simplest solution
+                    QMessageBox.information(self, "Folder Path", 
+                                        f"Your project folder is located at:\n{repo_dir}")
+                
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Could not open folder: {str(e)}")
+
 
     def open_repo_link(self, event):
         if self.selected_node:
@@ -840,7 +897,7 @@ class SystemView(QWidget):
 
                 try:
                     # Use powershell.exe through WSL to open the URL in Windows' default browser
-                    import subprocess
+                    
                     subprocess.run(['powershell.exe', 'start', url])
                 except Exception as e:
                     msg = QMessageBox(self)
