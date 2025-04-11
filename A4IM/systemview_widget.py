@@ -388,6 +388,11 @@ class SystemView(QWidget):
         self.construct_button.hide()
         right_layout.addWidget(self.construct_button)
 
+        self.risk_button = self.create_button("Risk Assesment")
+        #self.risk_button.clicked.connect(self.construct_module)
+        right_layout.addWidget(self.risk_button)
+
+
         self.view_bom_button = self.create_button("View Module BOM")
         self.view_bom_button.clicked.connect(self.view_module_bom)
         right_layout.addWidget(self.view_bom_button)
@@ -547,11 +552,22 @@ class SystemView(QWidget):
         repo_input.setPlaceholderText("https://github.com/username/repository")
         layout.addRow("Repository URL:", repo_input)
         
-        # Parent module selection
+        # Parent module selection - include all modules at all levels
         parent_select = QComboBox()
         parent_select.addItem("Project Root")
+        
+        # Add all top-level modules to the dropdown
         for module_name in self.modules_data:
             parent_select.addItem(module_name)
+        
+        # If a module is currently selected, set it as the default parent
+        if self.selected_node and self.selected_node.node_type == 'module':
+            selected_name = self.selected_node.name
+            for i in range(parent_select.count()):
+                if parent_select.itemText(i) == selected_name:
+                    parent_select.setCurrentIndex(i)
+                    break
+        
         layout.addRow("Parent Module:", parent_select)
         
         # Dialog buttons
@@ -572,24 +588,24 @@ class SystemView(QWidget):
                 parent_name = parent_select.currentText()
                 
                 # Create module directory
-                architect_dir = os.path.join("Downloaded Repositories", self.parent.architect_folder)
+                repo_dir = os.path.join("Downloaded Repositories", self.parent.repo_folder)
                 repo_name = repo_url.split('/')[-1]
-                module_dir = os.path.join(architect_dir, repo_name)
+                module_dir = os.path.join(repo_dir, repo_name)
                 os.makedirs(module_dir, exist_ok=True)
                 
-                # Create moduleInfo.txt
-                module_info_path = os.path.join(module_dir, "moduleInfo.txt")
+                # Create ModuleInfo.txt
+                module_info_path = os.path.join(module_dir, "ModuleInfo.txt")
                 with open(module_info_path, 'w', encoding='utf-8') as f:
                     f.write(f"[Module Name] {module_name}\n")
                     f.write(f"[Module Info] {description}\n")
                     f.write("[Requirements]\n")
                 
-                # Update parent's moduleInfo.txt if this is a submodule
+                # Update parent's ModuleInfo.txt if this is a submodule
                 if parent_name != "Project Root":
                     parent_info = self.find_module_by_name(self.modules_data, parent_name)
                     if parent_info and 'repository' in parent_info:
                         parent_repo = parent_info['repository']['name']
-                        parent_info_path = os.path.join(architect_dir, parent_repo, "moduleInfo.txt")
+                        parent_info_path = os.path.join(repo_dir, parent_repo, "ModuleInfo.txt")
                         
                         if os.path.exists(parent_info_path):
                             with open(parent_info_path, 'r', encoding='utf-8') as f:
@@ -609,8 +625,10 @@ class SystemView(QWidget):
                 
                 # Update data structure
                 new_module = {
+                    'name': module_name,  # Add the name key to the module data
                     'description': description,
                     'submodules': OrderedDict(),
+                    'submodule_addresses': [],
                     'repository': {
                         'name': repo_name,
                         'address': repo_url,
@@ -621,10 +639,19 @@ class SystemView(QWidget):
                 if parent_name == "Project Root":
                     self.modules_data[module_name] = new_module
                 else:
-                    current = self.modules_data[parent_name]
-                    if 'submodules' not in current:
-                        current['submodules'] = OrderedDict()
-                    current['submodules'][module_name] = new_module
+                    # Add to parent module's submodules
+                    parent_module = self.find_module_by_name(self.modules_data, parent_name)
+                    if parent_module:
+                        if 'submodules' not in parent_module:
+                            parent_module['submodules'] = OrderedDict()
+                        parent_module['submodules'][module_name] = new_module
+                        
+                        # Also add to parent's submodule_addresses
+                        if 'submodule_addresses' not in parent_module:
+                            parent_module['submodule_addresses'] = []
+                        parent_module['submodule_addresses'].append(repo_url)
+                    else:
+                        raise Exception(f"Could not find parent module: {parent_name}")
                 
                 # Refresh the view
                 self.populate_modules(self.modules_data)
@@ -634,13 +661,18 @@ class SystemView(QWidget):
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to create module: {str(e)}")
 
-
     def find_and_add_to_parent(self, modules, parent_name, new_module):
         for name, module in modules.items():
             if name == parent_name:
                 if 'submodules' not in module:
-                    module['submodules'] = {}
+                    module['submodules'] = OrderedDict()
                 module['submodules'][new_module['name']] = new_module
+                
+                # Also add to parent's submodule_addresses
+                if 'submodule_addresses' not in module:
+                    module['submodule_addresses'] = []
+                module['submodule_addresses'].append(new_module['repository']['address'])
+                
                 return True
             if 'submodules' in module:
                 if self.find_and_add_to_parent(module['submodules'], parent_name, new_module):
