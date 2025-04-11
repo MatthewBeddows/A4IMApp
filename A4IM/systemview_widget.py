@@ -727,6 +727,14 @@ class SystemView(QWidget):
             else:
                 self.construct_button.hide()
 
+            # Check if module has docs
+            if repository_info and repository_info.get('docs_path'):
+                self.risk_button.show()
+            else:
+                self.risk_button.hide()
+
+
+
             # Update View BOM button
             self.view_bom_button.setText("View Module BOM")
             self.view_bom_button.clicked.disconnect()
