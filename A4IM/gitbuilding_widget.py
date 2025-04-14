@@ -127,8 +127,6 @@ class GitBuildingWindow(QWidget):
                     </div>
                 """)
                 
-                # Try to open in browser immediately
-                self.open_in_browser()
             else:
                 # Non-file URL
                 self.current_base_path = url
