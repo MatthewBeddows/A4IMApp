@@ -2,7 +2,7 @@ import sys
 import os
 import requests
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QStackedWidget, QProgressBar, QMessageBox)
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QCoreApplication
 from collections import OrderedDict
 from mainmenu_widget import MainMenuWidget
 from gitbuilding_widget import GitBuildingWindow
@@ -261,8 +261,14 @@ class GitFileReaderApp(QMainWindow):
         
         # Create the root module entry
         repo_name = self.initial_repo_url.split('/')[-1]
+
+        #docs handling
         docs_path = os.path.join("Downloaded Repositories", self.repo_folder, "RootModule", "orshards", "index.html")
         has_docs = os.path.exists(docs_path)
+
+        #risk assessment handling
+        #risk_path = 
+        #has_risk = 
         
         # Initialize modules dictionary with the root module
         self.modules = OrderedDict()
@@ -414,6 +420,12 @@ class GitFileReaderApp(QMainWindow):
 
 def main():
     app = QApplication(sys.argv + ['--disable-seccomp-filter-sandbox'])
+
+    # Configure QtWebEngine for software rendering
+    QCoreApplication.setAttribute(Qt.AA_UseSoftwareOpenGL, True)
+    QCoreApplication.setAttribute(Qt.AA_ShareOpenGLContexts, True)
+
+
     # Import here to avoid circular imports
     from RepositorySelector_widget import RepositorySelector
     selector = RepositorySelector()
