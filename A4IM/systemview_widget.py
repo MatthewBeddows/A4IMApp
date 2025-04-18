@@ -722,8 +722,8 @@ class SystemView(QWidget):
             self.completion_checkbox.blockSignals(False)
 
             # Check if module has docs
-            repository_info = data.get('repository', {})
-            if repository_info and repository_info.get('docs_path'):
+            doc_file_path = self.check_module_documentation(data)
+            if doc_file_path:
                 self.construct_button.show()
             else:
                 self.construct_button.hide()
@@ -841,19 +841,76 @@ class SystemView(QWidget):
             print("No project selected")
 
     def construct_module(self):
-        if self.selected_node:
-            repository_info = self.selected_node.data.get('repository', {})
+        """Open the module documentation in the web browser"""
+        if not self.selected_node:
+            QMessageBox.warning(self, "Error", "No module selected.")
+            return
+        
+        # Check for documentation file
+        doc_path = self.check_module_documentation(self.selected_node.data)
+        
+        if not doc_path:
+            QMessageBox.information(self, "Documentation Not Found", 
+                                "Documentation not found for this module.")
+            return
+        
+        # Create file URL
+        file_url = QUrl.fromLocalFile(os.path.abspath(doc_path))
+        
+        # Show the Git Building window and pass the file URL
+        self.parent.show_git_building(
+            self.selected_node.name,
+            None,
+            file_url.toString()
+        )
 
-            if repository_info and repository_info.get('docs_path'):
-                file_url = QUrl.fromLocalFile(os.path.abspath(repository_info['docs_path']))
+    def check_module_documentation(self, module_data):
+        """Check if a module has documentation file"""
+        if not module_data or not isinstance(module_data, dict):
+            return None
+            
+        repository_info = module_data.get('repository', {})
+        if not repository_info or not repository_info.get('name'):
+            return None
+            
+        # Get the repository folder
+        repo_dir = os.path.join("Downloaded Repositories", self.parent.repo_folder)
+        module_dir = os.path.join(repo_dir, repository_info.get('name'))
+        
+        if not os.path.exists(module_dir):
+            return None
+        
+        # Check for documentation file
+        doc_path = os.path.join(module_dir, "src", "doc", "_site", "missing.html")
+        
+        # Also check with src in different capitalizations
+        alt_paths = [
+            os.path.join(module_dir, "Src", "doc", "_site", "missing.html"),
+            os.path.join(module_dir, "SRC", "doc", "_site", "missing.html"),
+            # Check with Doc variations
+            os.path.join(module_dir, "src", "Doc", "_site", "missing.html"),
+            os.path.join(module_dir, "src", "DOC", "_site", "missing.html"),
+            # Check with _site variations
+            os.path.join(module_dir, "src", "doc", "_Site", "missing.html"),
+            os.path.join(module_dir, "src", "doc", "_SITE", "missing.html"),
+            # Check with missing.html variations
+            os.path.join(module_dir, "src", "doc", "_site", "Missing.html"),
+            os.path.join(module_dir, "src", "doc", "_site", "MISSING.html"),
+            # Common alternative capitalization combinations
+            os.path.join(module_dir, "Src", "Doc", "_Site", "Missing.html"),
+            os.path.join(module_dir, "SRC", "DOC", "_SITE", "MISSING.html"),
+        ]
+        
+        # Check main path first
+        if os.path.exists(doc_path):
+            return doc_path
+        
+        # Then check alternative paths
+        for path in alt_paths:
+            if os.path.exists(path):
+                return path
                 
-                self.parent.show_git_building(
-                    self.selected_node.name,
-                    None,
-                    file_url.toString()
-                )
-            else:
-                print("No documentation available for this module")
+        return None
                 
     # Recenter the graphics view
     def recenter_view(self):
