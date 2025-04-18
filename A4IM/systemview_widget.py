@@ -388,8 +388,9 @@ class SystemView(QWidget):
         self.construct_button.hide()
         right_layout.addWidget(self.construct_button)
 
-        self.risk_button = self.create_button("Risk Assesment")
-        #self.risk_button.clicked.connect(self.construct_module)
+        self.risk_button = self.create_button("Risk Assessment")
+        self.risk_button.clicked.connect(self.open_risk_assessment)
+        self.risk_button.hide()  # Initially hide the button
         right_layout.addWidget(self.risk_button)
 
 
@@ -727,8 +728,9 @@ class SystemView(QWidget):
             else:
                 self.construct_button.hide()
 
-            # Check if module has docs
-            if repository_info and repository_info.get('docs_path'):
+            # Check if risk assessment
+            risk_file_path = self.check_risk_assessment_file(data)
+            if risk_file_path:
                 self.risk_button.show()
             else:
                 self.risk_button.hide()
@@ -1006,4 +1008,120 @@ class SystemView(QWidget):
                 line.setVisible(True)
 
 
-    
+    def check_risk_assessment_file(self, module_data):
+        """Check if a risk assessment file exists for the module"""
+        if not module_data or not isinstance(module_data, dict):
+            return None
+            
+        repository_info = module_data.get('repository', {})
+        if not repository_info or not repository_info.get('name'):
+            return None
+            
+        # Get the repository folder
+        repo_dir = os.path.join("Downloaded Repositories", self.parent.repo_folder)
+        module_dir = os.path.join(repo_dir, repository_info.get('name'))
+        
+        if not os.path.exists(module_dir):
+            return None
+        
+        # Check for risk assessment file with different capitalizations
+        possible_filenames = [
+            "RiskAssessment.txt", 
+            "riskassessment.txt", 
+            "RISKASSESSMENT.txt", 
+            "Risk_Assessment.txt", 
+            "risk_assessment.txt",
+            "risk-assessment.txt",
+            "Risk-Assessment.txt"
+        ]
+        
+        for filename in possible_filenames:
+            file_path = os.path.join(module_dir, filename)
+            if os.path.exists(file_path):
+                return file_path
+                
+        return None
+
+    def open_risk_assessment(self):
+        """Open the risk assessment file for the selected module"""
+        if not self.selected_node or not isinstance(self.selected_node.data, dict):
+            QMessageBox.warning(self, "Error", "No module selected or invalid module data.")
+            return
+            
+        risk_file_path = self.check_risk_assessment_file(self.selected_node.data)
+        
+        if not risk_file_path:
+            QMessageBox.information(self, "Risk Assessment", 
+                                "No risk assessment file found for this module.")
+            return
+        
+        try:
+            # Check for WSL environment
+            is_wsl = False
+            try:
+                with open('/proc/version', 'r') as f:
+                    if 'microsoft' in f.read().lower():
+                        is_wsl = True
+            except:
+                pass
+                
+            if is_wsl:
+                # For WSL, convert path to Windows format and use notepad
+                try:
+                    # Get Windows path using wslpath
+                    process = subprocess.run(['wslpath', '-w', risk_file_path], 
+                                        capture_output=True, text=True, check=True)
+                    windows_path = process.stdout.strip()
+                    
+                    # Use PowerShell with proper quoting for paths with spaces
+                    powershell_command = f'notepad.exe "{windows_path}"'
+                    subprocess.run(['powershell.exe', '-Command', powershell_command])
+                except Exception as e:
+                    print(f"PowerShell error: {str(e)}")
+                    # If conversion fails, try to open with a default Linux editor
+                    try:
+                        subprocess.run(['xdg-open', risk_file_path])
+                    except:
+                        # As a last resort, show the contents in a dialog
+                        self.show_risk_assessment_content(risk_file_path)
+            else:
+                # Standard OS handling
+                import platform
+                if platform.system() == "Windows":
+                    os.startfile(risk_file_path)
+                elif platform.system() == "Darwin":  # macOS
+                    subprocess.run(['open', risk_file_path])
+                else:  # Linux/Unix
+                    subprocess.run(['xdg-open', risk_file_path])
+                    
+        except Exception as e:
+            print(f"Error opening file: {str(e)}")
+            # If all else fails, read and show the file contents in a dialog
+            self.show_risk_assessment_content(risk_file_path)
+
+    def show_risk_assessment_content(self, file_path):
+        """Show file contents in a dialog when direct opening fails"""
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+                
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Risk Assessment")
+            dialog.setMinimumSize(600, 400)
+            
+            layout = QVBoxLayout()
+            
+            text_edit = QTextEdit()
+            text_edit.setPlainText(content)
+            text_edit.setReadOnly(True)
+            layout.addWidget(text_edit)
+            
+            close_button = QPushButton("Close")
+            close_button.clicked.connect(dialog.accept)
+            layout.addWidget(close_button)
+            
+            dialog.setLayout(layout)
+            dialog.exec_()
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Could not read risk assessment file: {str(e)}")
+
