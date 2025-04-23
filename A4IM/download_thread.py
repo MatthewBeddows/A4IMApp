@@ -55,38 +55,3 @@ class DownloadThread(QThread):
         
         self.finished.emit()
     
-    def add_timestamp_to_module_info(self, repo_path):
-        """Add a deployment timestamp to the ModuleInfo.txt file"""
-        module_info_path = None
-        
-        # Find ModuleInfo.txt with case-insensitive search
-        for filename in os.listdir(repo_path):
-            if filename.lower() == "moduleinfo.txt":
-                module_info_path = os.path.join(repo_path, filename)
-                break
-        
-        if module_info_path:
-            try:
-                # Read current content
-                with open(module_info_path, 'r') as f:
-                    content = f.read()
-                
-                # Get current timestamp
-                timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                
-                # Check if there's already a deployment timestamp
-                if "[Deployed]" in content:
-                    # Replace existing timestamp
-                    import re
-                    content = re.sub(r'\[Deployed\].*', f"[Deployed] {timestamp}", content)
-                else:
-                    # Add timestamp at the end
-                    content += f"\n[Deployed] {timestamp}"
-                
-                # Write back to file
-                with open(module_info_path, 'w') as f:
-                    f.write(content)
-                    
-                print(f"Added deployment timestamp to {module_info_path}")
-            except Exception as e:
-                print(f"Failed to add timestamp to ModuleInfo.txt: {e}")

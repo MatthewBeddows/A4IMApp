@@ -174,62 +174,123 @@ class GitFileReaderApp(QMainWindow):
         self.central_widget.setCurrentWidget(self.git_building)
 
     def download_modules(self, parent_module_path, module_addresses):
-        # Check which repositories actually need to be downloaded
-        new_addresses = []
+        """Simple function to download Git repositories one by one"""
+        # Create the download directory if it doesn't exist
         repo_dir = os.path.join("Downloaded Repositories", self.repo_folder)
+        if not os.path.exists(repo_dir):
+            os.makedirs(repo_dir)
         
+        # Filter out repositories that already exist
+        to_download = []
         for address in module_addresses:
             repo_name = address.split('/')[-1]
             repo_path = os.path.join(repo_dir, repo_name)
             
-            # If repo directory already exists and contains the expected files, skip downloading
+            # Simple check - if ModuleInfo.txt exists, skip download
+            has_module_info = False
             if os.path.exists(repo_path) and os.path.isdir(repo_path):
-                # Check if it has a .git directory (indicating it's a valid repo)
-                if os.path.exists(os.path.join(repo_path, ".git")):
-                    # Check if it has ModuleInfo.txt
-                    module_info_exists = False
-                    for filename in os.listdir(repo_path):
-                        if filename.lower() == "moduleinfo.txt":
-                            module_info_exists = True
-                            break
-                    
-                    if module_info_exists:
-                        print(f"Repository already exists, skipping download: {repo_name}")
-                        continue
+                for filename in os.listdir(repo_path):
+                    if filename.lower() == "moduleinfo.txt":
+                        has_module_info = True
+                        break
             
-            # If we got here, we need to download this repo
-            new_addresses.append(address)
+            if not has_module_info:
+                to_download.append(address)
         
-        # If nothing to download, process the modules and return
-        if not new_addresses:
-            print("All repositories already exist, skipping downloads")
+        # If nothing to download, just process the modules and return
+        if not to_download:
+            print("All repositories already exist")
             self.parse_module_info(parent_module_path)
-            
-            # Check if we're all done
             self.check_if_all_complete()
             return
         
-        # Continue with downloading the new repositories
-        self.pending_downloads += len(new_addresses)
-        
+        # Set up progress bar
+        self.pending_downloads = len(to_download)
         if self.progress_bar is None:
             self.progress_bar = QProgressBar(self)
             self.progress_bar.setGeometry(30, 40, 200, 25)
             self.progress_bar.setAlignment(Qt.AlignCenter)
             self.main_menu.layout().addWidget(self.progress_bar)
-        else:
-            self.progress_bar.setParent(None)
-            self.progress_bar.deleteLater()
-            self.progress_bar = QProgressBar(self)
-            self.progress_bar.setGeometry(30, 40, 200, 25)
-            self.progress_bar.setAlignment(Qt.AlignCenter)
-            self.main_menu.layout().addWidget(self.progress_bar)
         
-        download_thread = DownloadThread(new_addresses, self.repo_folder)
-        download_thread.progress.connect(self.update_progress)
-        download_thread.finished.connect(lambda: self.module_download_finished(parent_module_path, download_thread))
-        download_thread.start()
-        self.active_threads.append(download_thread)
+        # Download each repository one by one using standard git command
+        for i, address in enumerate(to_download):
+            repo_name = address.split('/')[-1]
+            repo_path = os.path.join(repo_dir, repo_name)
+            
+            print(f"Downloading {repo_name} from {address}")
+            
+            # Remove existing directory if it exists
+            if os.path.exists(repo_path):
+                import shutil
+                shutil.rmtree(repo_path)
+            
+            # Clone the repository
+            try:
+                import subprocess
+                result = subprocess.run(
+                    ["git", "clone", address, repo_path],
+                    timeout=90,  # 90 second timeout
+                    capture_output=True,
+                    text=True
+                )
+                
+                if result.returncode == 0:
+                    print(f"Successfully cloned {repo_name}")
+                    # Add timestamp to ModuleInfo.txt
+                    self.add_timestamp_to_module_info(repo_path)
+                else:
+                    print(f"Failed to clone {repo_name}: {result.stderr}")
+            except Exception as e:
+                print(f"Error cloning {repo_name}: {str(e)}")
+            
+            # Update progress
+            self.progress_bar.setValue(int((i + 1) / len(to_download) * 100))
+        
+        # Process downloaded modules
+        self.pending_downloads = 0
+        self.parse_module_info(parent_module_path)
+        self.check_if_all_complete()
+
+    def add_timestamp_to_module_info(self, repo_path):
+        """Add a deployment timestamp to the ModuleInfo.txt file"""
+        module_info_path = None
+        
+        # Find ModuleInfo.txt with case-insensitive search
+        try:
+            for filename in os.listdir(repo_path):
+                if filename.lower() == "moduleinfo.txt":
+                    module_info_path = os.path.join(repo_path, filename)
+                    break
+        except Exception as e:
+            print(f"Error listing directory {repo_path}: {str(e)}")
+            return
+            
+        if module_info_path:
+            try:
+                # Read current content
+                with open(module_info_path, 'r') as f:
+                    content = f.read()
+                
+                # Get current timestamp
+                import datetime
+                timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                
+                # Check if there's already a deployment timestamp
+                if "[Deployed]" in content:
+                    # Replace existing timestamp
+                    import re
+                    content = re.sub(r'\[Deployed\].*', f"[Deployed] {timestamp}", content)
+                else:
+                    # Add timestamp at the end
+                    content += f"\n[Deployed] {timestamp}"
+                
+                # Write back to file
+                with open(module_info_path, 'w') as f:
+                    f.write(content)
+                    
+                print(f"Added deployment timestamp to {module_info_path}")
+            except Exception as e:
+                print(f"Failed to add timestamp to ModuleInfo.txt: {str(e)}")
 
     def module_download_finished(self, parent_module_path, thread):
         """Handle completion of module downloads"""
