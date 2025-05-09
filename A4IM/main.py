@@ -14,7 +14,7 @@ from RepositorySelector_widget import RepositorySelector
 class GitFileReaderApp(QMainWindow):
     def __init__(self, initial_repo_url, repo_folder):
         super().__init__()
-        self.setWindowTitle("Git File Reader")
+        self.setWindowTitle("Orshards Repository Tool")
         self.setGeometry(100, 100, 800, 600)
 
         # Store the initial repository URL
