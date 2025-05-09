@@ -32,6 +32,11 @@ class RepositorySelector(QMainWindow):
         layout.addWidget(self.project_list)
 
         # Button to load it up
+        new_button = QPushButton("New Project")
+        #new_button.clicked.connect(self.load_project)
+        layout.addWidget(new_button)
+
+        # Button to load it up
         load_button = QPushButton("Load Selected Project")
         load_button.clicked.connect(self.load_project)
         layout.addWidget(load_button)
