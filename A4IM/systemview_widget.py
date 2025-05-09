@@ -557,15 +557,28 @@ class SystemView(QWidget):
         parent_select = QComboBox()
         parent_select.addItem("Project Root")
         
-        # Add all top-level modules to the dropdown
-        for module_name in self.modules_data:
-            parent_select.addItem(module_name)
+        # Collect all module names including nested submodules with hierarchy information
+        all_modules = []
+        def collect_modules(modules, depth=0):
+            for module_name, module_data in modules.items():
+                # Store tuple of (display_name, actual_name, depth)
+                display_name = "  " * depth + module_name  # Add indentation based on depth
+                all_modules.append((display_name, module_name, depth))
+                if 'submodules' in module_data and module_data['submodules']:
+                    collect_modules(module_data['submodules'], depth + 1)
+        
+        # Collect all modules from the hierarchy
+        collect_modules(self.modules_data)
+        
+        # Add all modules to the dropdown with proper indentation to show hierarchy
+        for display_name, actual_name, _ in all_modules:
+            parent_select.addItem(display_name, actual_name)  # Store actual_name as item data
         
         # If a module is currently selected, set it as the default parent
         if self.selected_node and self.selected_node.node_type == 'module':
             selected_name = self.selected_node.name
             for i in range(parent_select.count()):
-                if parent_select.itemText(i) == selected_name:
+                if parent_select.itemData(i) == selected_name:  # Compare with the actual name stored as item data
                     parent_select.setCurrentIndex(i)
                     break
         
