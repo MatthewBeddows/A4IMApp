@@ -555,30 +555,30 @@ class SystemView(QWidget):
         
         # Parent module selection - include all modules at all levels
         parent_select = QComboBox()
-        parent_select.addItem("Project Root")
+        parent_select.addItem("Project Root")  # No user data needed for root
         
-        # Collect all module names including nested submodules with hierarchy information
-        all_modules = []
+        # Collect all module names including nested submodules
         def collect_modules(modules, depth=0):
             for module_name, module_data in modules.items():
-                # Store tuple of (display_name, actual_name, depth)
-                display_name = "  " * depth + module_name  # Add indentation based on depth
-                all_modules.append((display_name, module_name, depth))
+                # Create indented display name for visual hierarchy
+                display_name = "  " * depth + module_name
+                # Add to dropdown with actual module name as user data
+                parent_select.addItem(display_name, module_name)
+                
+                # Process submodules if any
                 if 'submodules' in module_data and module_data['submodules']:
                     collect_modules(module_data['submodules'], depth + 1)
         
         # Collect all modules from the hierarchy
         collect_modules(self.modules_data)
         
-        # Add all modules to the dropdown with proper indentation to show hierarchy
-        for display_name, actual_name, _ in all_modules:
-            parent_select.addItem(display_name, actual_name)  # Store actual_name as item data
-        
         # If a module is currently selected, set it as the default parent
         if self.selected_node and self.selected_node.node_type == 'module':
             selected_name = self.selected_node.name
             for i in range(parent_select.count()):
-                if parent_select.itemData(i) == selected_name:  # Compare with the actual name stored as item data
+                # Use itemData to get the actual module name without indentation
+                item_data = parent_select.itemData(i)
+                if item_data == selected_name:
                     parent_select.setCurrentIndex(i)
                     break
         
@@ -599,7 +599,14 @@ class SystemView(QWidget):
                 module_name = name_input.text().strip()
                 description = description_input.toPlainText().strip()
                 repo_url = repo_input.text().strip()
-                parent_name = parent_select.currentText()
+                
+                # Get the actual module name from the dropdown's user data
+                parent_index = parent_select.currentIndex()
+                if parent_index == 0:  # "Project Root" is selected
+                    parent_name = "Project Root"
+                else:
+                    # Get the actual module name from itemData (without indentation)
+                    parent_name = parent_select.itemData(parent_index)
                 
                 # Create module directory
                 repo_dir = os.path.join("Downloaded Repositories", self.parent.repo_folder)
@@ -619,9 +626,12 @@ class SystemView(QWidget):
                     parent_info = self.find_module_by_name(self.modules_data, parent_name)
                     if parent_info and 'repository' in parent_info:
                         parent_repo = parent_info['repository']['name']
-                        parent_info_path = os.path.join(repo_dir, parent_repo, "ModuleInfo.txt")
+                        parent_repo_dir = os.path.join(repo_dir, parent_repo)
                         
-                        if os.path.exists(parent_info_path):
+                        # Use the new function to find the module info file
+                        parent_info_path = self.find_module_info_file(parent_repo_dir)
+                        
+                        if parent_info_path:
                             with open(parent_info_path, 'r', encoding='utf-8') as f:
                                 lines = f.readlines()
                             
@@ -636,10 +646,27 @@ class SystemView(QWidget):
                                 
                                 with open(parent_info_path, 'w', encoding='utf-8') as f:
                                     f.writelines(lines)
+                            else:
+                                # If [Requirements] section not found, add it
+                                lines.append("[Requirements]\n")
+                                lines.append(f"[Module Address] {repo_url}\n")
+                                
+                                with open(parent_info_path, 'w', encoding='utf-8') as f:
+                                    f.writelines(lines)
+                        else:
+                            # Create new module info file if not found
+                            parent_info_path = os.path.join(parent_repo_dir, "ModuleInfo.txt")
+                            with open(parent_info_path, 'w', encoding='utf-8') as f:
+                                f.write(f"[Module Name] {parent_name}\n")
+                                f.write(f"[Module Info] Parent module for {module_name}\n")
+                                f.write("[Requirements]\n")
+                                f.write(f"[Module Address] {repo_url}\n")
+                    else:
+                        raise Exception(f"Could not find parent module: {parent_name}")
                 
                 # Update data structure
                 new_module = {
-                    'name': module_name,  # Add the name key to the module data
+                    'name': module_name,
                     'description': description,
                     'submodules': OrderedDict(),
                     'submodule_addresses': [],
@@ -674,6 +701,7 @@ class SystemView(QWidget):
                 
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to create module: {str(e)}")
+
 
     def find_and_add_to_parent(self, modules, parent_name, new_module):
         for name, module in modules.items():
@@ -1068,7 +1096,33 @@ class SystemView(QWidget):
                     return result
         return None
 
-
+    def find_module_info_file(self, module_dir):
+        """Find the module info file with case-insensitive search and variation handling"""
+        possible_filenames = [
+            "ModuleInfo.txt",
+            "moduleInfo.txt",
+            "moduleinfo.txt",
+            "MODULEINFO.txt",
+            "ModuleInfor.txt",
+            "moduleInfor.txt",
+            "moduleinfor.txt",
+            "Module_Info.txt",
+            "module_info.txt"
+        ]
+        
+        for filename in possible_filenames:
+            file_path = os.path.join(module_dir, filename)
+            if os.path.exists(file_path):
+                return file_path
+        
+        # If no exact match is found, try a case-insensitive search
+        existing_files = os.listdir(module_dir)
+        for existing_file in existing_files:
+            lower_file = existing_file.lower()
+            if "moduleinfo" in lower_file or "moduleinfor" in lower_file:
+                return os.path.join(module_dir, existing_file)
+        
+        return None  # No matching file found
 
     # Update node visibility (used when toggling)
     def update_node_visibility(self):
@@ -1194,4 +1248,3 @@ class SystemView(QWidget):
             dialog.exec_()
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Could not read risk assessment file: {str(e)}")
-
