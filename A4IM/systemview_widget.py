@@ -776,26 +776,32 @@ class SystemView(QWidget):
             else:
                 self.risk_button.hide()
 
-
-
-            # Update View BOM button
-            self.view_bom_button.setText("View Module BOM")
-            self.view_bom_button.clicked.disconnect()
-            self.view_bom_button.clicked.connect(self.view_module_bom)
+            # Check for BOM file in lib folder
+            has_bom = self.check_for_bom_file(data)
+            if has_bom:
+                self.view_bom_button.setText("View Module BOM")
+                self.view_bom_button.clicked.disconnect()
+                self.view_bom_button.clicked.connect(self.view_module_bom)
+                self.view_bom_button.show()
+            else:
+                # Hide the BOM button if there's no BOM file
+                self.view_bom_button.hide()
 
         else:
+            # For project node
             self.completion_checkbox.hide()
             self.construct_button.hide()
+            self.risk_button.hide()
 
-            # Update View BOM button
+            # Update View BOM button for project node
             self.view_bom_button.setText("View Project Info")
             self.view_bom_button.clicked.disconnect()
             self.view_bom_button.clicked.connect(self.view_project_info)
+            self.view_bom_button.show()
 
         # If in toggle mode and a module node is clicked, update the display
         if self.toggle_mode:
             self.update_toggle_view(node)
-
 
     def get_button_style(self):
         return """
@@ -858,16 +864,94 @@ class SystemView(QWidget):
                 parent_node.update_node_color()
                 parent_node = parent_node.parent_node
 
-    # View module BOM
     def view_module_bom(self):
-        if self.selected_node:
-            name = self.selected_node.name
-            # Implement logic to open the module BOM URL
-            # For now, we'll just print a message
-            print(f"Viewing BOM for module: {name}")
-            # You can use self.parent.show_git_building(...) if needed
+        """View the Bill of Materials (BOM) for the selected module"""
+        if not self.selected_node:
+            QMessageBox.warning(self, "Error", "No module selected.")
+            return
+            
+        # Get repository information
+        repository_info = self.selected_node.data.get('repository', {})
+        if not repository_info or not repository_info.get('name'):
+            QMessageBox.warning(self, "Error", "No repository information available for this module.")
+            return
+            
+        # Get the repository folder
+        repo_dir = os.path.join("Downloaded Repositories", self.parent.repo_folder)
+        module_dir = os.path.join(repo_dir, repository_info.get('name'))
+        
+        if not os.path.exists(module_dir):
+            QMessageBox.warning(self, "Error", f"Module directory does not exist: {module_dir}")
+            return
+        
+        # Check specifically for BOM.csv in the lib folder as requested
+        lib_folder = os.path.join(module_dir, "lib")
+        bom_file = os.path.join(lib_folder, "BOM.csv")
+        
+        # If the lib/BOM.csv exists, open it directly
+        if os.path.exists(bom_file):
+            self.open_csv_in_viewer(bom_file)
         else:
-            print("No module selected")
+            # If lib/BOM.csv doesn't exist, inform the user
+            QMessageBox.information(self, "BOM File Not Found", 
+                                "No BOM.csv file was found in the lib folder for this module.")
+
+    def open_csv_in_viewer(self, csv_path):
+        """Open a CSV file in the CSV viewer"""
+        try:
+            # Import the CSV viewer class
+            from CSVViewer_widget import CSVViewerWidget
+            
+            # Create the CSV viewer
+            csv_viewer = CSVViewerWidget(self.parent, csv_path)
+            
+            # Add to parent's central widget if it exists
+            if hasattr(self.parent, 'central_widget'):
+                # First, check if the CSV viewer is already in the central widget
+                for i in range(self.parent.central_widget.count()):
+                    if isinstance(self.parent.central_widget.widget(i), CSVViewerWidget):
+                        # Remove the existing CSV viewer
+                        existing_viewer = self.parent.central_widget.widget(i)
+                        self.parent.central_widget.removeWidget(existing_viewer)
+                        existing_viewer.deleteLater()
+                        
+                # Add the new CSV viewer
+                self.parent.central_widget.addWidget(csv_viewer)
+                self.parent.central_widget.setCurrentWidget(csv_viewer)
+            else:
+                # If no central widget, just show it as a separate window
+                csv_viewer.show()
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open CSV viewer: {str(e)}")
+
+    def check_for_bom_file(self, module_data):
+        """Check if a module has a BOM.csv file in the lib folder"""
+        if not module_data or not isinstance(module_data, dict):
+            return False
+                
+        repository_info = module_data.get('repository', {})
+        if not repository_info or not repository_info.get('name'):
+            return False
+                
+        # Get the repository folder
+        repo_dir = os.path.join("Downloaded Repositories", self.parent.repo_folder)
+        module_dir = os.path.join(repo_dir, repository_info.get('name'))
+        
+        if not os.path.exists(module_dir):
+            return False
+        
+        # Check specifically for BOM.csv in the lib folder
+        lib_folder = os.path.join(module_dir, "lib")
+        
+        # First check if lib folder exists
+        if not os.path.exists(lib_folder) or not os.path.isdir(lib_folder):
+            return False
+            
+        # Then check for BOM.csv file
+        bom_file = os.path.join(lib_folder, "BOM.csv")
+        return os.path.exists(bom_file)
+
 
     # View project info
     def view_project_info(self):
