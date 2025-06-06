@@ -17,6 +17,7 @@ class GitBuildingWindow(QWidget):
         self.is_windows = platform.system() == "Windows"
         self.doc_links = []  # Store the documentation links
         self.completed_docs = set()  # Store completed documentation pages
+        self.task_progress_file = None  # Path to the ModuleInfo.txt file
         self.setup_ui()
         self.debug_mode = True
 
@@ -155,6 +156,249 @@ class GitBuildingWindow(QWidget):
             QPushButton:pressed { background-color: #364765; }
         """
 
+    def determine_module_info_file(self):
+        """Determine the path for the ModuleInfo.txt file based on current documentation"""
+        if not self.current_base_path:
+            return None
+            
+        try:
+            # Get the module directory (should contain the documentation)
+            path_parts = self.current_base_path.replace('\\', '/').split('/')
+            
+            self.log(f"Path parts: {path_parts}")
+            
+            # Find the module root directory
+            # Look for the pattern: .../Downloaded Repositories/PROJECT/MODULE/src/doc/_site/file.html
+            module_dir = None
+            
+            # Find "Downloaded Repositories" in the path
+            if "Downloaded Repositories" in path_parts:
+                repo_index = path_parts.index("Downloaded Repositories")
+                self.log(f"Found 'Downloaded Repositories' at index: {repo_index}")
+                
+                # The structure should be: Downloaded Repositories / PROJECT / MODULE / src / ...
+                # We want the MODULE directory, which should be at repo_index + 2
+                if len(path_parts) > repo_index + 2:
+                    # Check if we have the pattern: Downloaded Repositories / PROJECT / MODULE
+                    project_dir = path_parts[repo_index + 1]  # OSI² ONE
+                    module_name = path_parts[repo_index + 2]   # [current module]
+                    
+                    self.log(f"Project: {project_dir}, Module: {module_name}")
+                    
+                    # Build the module directory path
+                    if self.is_windows and ':' in path_parts[0]:
+                        # Windows path
+                        module_dir = path_parts[0] + ':/' + '/'.join(path_parts[1:repo_index + 3])
+                    else:
+                        # Unix/Linux path
+                        module_dir = '/' + '/'.join(path_parts[1:repo_index + 3])
+                    
+                    self.log(f"Determined module directory: {module_dir}")
+                else:
+                    self.log("Not enough path parts after 'Downloaded Repositories'")
+            
+            if not module_dir:
+                self.log("Could not determine module directory from path structure")
+                # Fallback: look for src/doc pattern and go back
+                for i, part in enumerate(path_parts):
+                    if part == 'src' and i + 2 < len(path_parts) and path_parts[i + 1] == 'doc':
+                        # Go back to the directory before 'src'
+                        if i >= 1:
+                            if self.is_windows and ':' in path_parts[0]:
+                                module_dir = path_parts[0] + ':/' + '/'.join(path_parts[1:i])
+                            else:
+                                module_dir = '/' + '/'.join(path_parts[1:i])
+                            self.log(f"Fallback: determined module directory: {module_dir}")
+                            break
+                
+            if not module_dir:
+                # Last fallback: use the directory containing the current file
+                module_dir = os.path.dirname(self.current_base_path)
+                self.log(f"Last fallback: using file directory: {module_dir}")
+                
+            # Find ModuleInfo.txt with case-insensitive search
+            if module_dir and os.path.exists(module_dir):
+                module_info_file = self.find_module_info_file(module_dir)
+                if module_info_file:
+                    self.log(f"ModuleInfo.txt file found: {module_info_file}")
+                    return module_info_file
+                else:
+                    self.log(f"ModuleInfo.txt not found in: {module_dir}")
+                    # List what files are actually there for debugging
+                    try:
+                        files = os.listdir(module_dir)
+                        self.log(f"Files in directory: {files}")
+                    except:
+                        pass
+                    return None
+            else:
+                self.log(f"Module directory doesn't exist: {module_dir}")
+                return None
+                
+        except Exception as e:
+            self.log(f"Error determining ModuleInfo.txt file: {e}")
+            import traceback
+            self.log(traceback.format_exc())
+            return None
+
+    def find_module_info_file(self, module_dir):
+        """Find the module info file with case-insensitive search and variation handling"""
+        if not os.path.exists(module_dir):
+            return None
+            
+        possible_filenames = [
+            "ModuleInfo.txt",
+            "moduleInfo.txt", 
+            "moduleinfo.txt",
+            "MODULEINFO.txt",
+            "ModuleInfor.txt",
+            "moduleInfor.txt",
+            "moduleinfor.txt",
+            "Module_Info.txt",
+            "module_info.txt"
+        ]
+        
+        for filename in possible_filenames:
+            file_path = os.path.join(module_dir, filename)
+            if os.path.exists(file_path):
+                return file_path
+        
+        # If no exact match is found, try a case-insensitive search
+        try:
+            existing_files = os.listdir(module_dir)
+            for existing_file in existing_files:
+                lower_file = existing_file.lower()
+                if "moduleinfo" in lower_file or "moduleinfor" in lower_file:
+                    return os.path.join(module_dir, existing_file)
+        except:
+            pass
+        
+        return None  # No matching file found
+
+    def load_task_progress(self):
+        """Load task completion status from ModuleInfo.txt [Tasks] section"""
+        self.task_progress_file = self.determine_module_info_file()
+        
+        if not self.task_progress_file:
+            self.log("No ModuleInfo.txt file found")
+            return
+            
+        if not os.path.exists(self.task_progress_file):
+            self.log(f"ModuleInfo.txt file doesn't exist: {self.task_progress_file}")
+            return
+            
+        try:
+            with open(self.task_progress_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            self.log(f"Loading task progress from ModuleInfo.txt: {self.task_progress_file}")
+            
+            # Look for [Tasks] section
+            if '[Tasks]' not in content:
+                self.log("No [Tasks] section found in ModuleInfo.txt")
+                return
+                
+            # Extract tasks section
+            tasks_section = content.split('[Tasks]')[1]
+            # Stop at next section (any line starting with [)
+            lines = tasks_section.split('\n')
+            task_lines = []
+            for line in lines:
+                line = line.strip()
+                if line.startswith('[') and line.endswith(']') and 'Completed' not in line:
+                    # This is a new section, stop parsing tasks
+                    break
+                if line:
+                    task_lines.append(line)
+            
+            # Parse individual tasks
+            for line in task_lines:
+                if not line:
+                    continue
+                    
+                # Look for pattern: [Task Name] Completed Yes/No
+                task_match = re.match(r'\[([^\]]+)\]\s*Completed\s+(Yes|No)', line, re.IGNORECASE)
+                if task_match:
+                    task_name = task_match.group(1).strip()
+                    is_completed = task_match.group(2).lower() == 'yes'
+                    
+                    if is_completed:
+                        # Find the corresponding doc link and mark as completed
+                        for doc in self.doc_links:
+                            if task_name in doc['title'] or doc['title'] in task_name:
+                                self.completed_docs.add(doc['href'])
+                                self.log(f"Loaded completed task: {task_name}")
+                                break
+                                
+        except Exception as e:
+            self.log(f"Error loading task progress: {e}")
+
+    def save_task_progress(self):
+        """Save task completion status to ModuleInfo.txt [Tasks] section"""
+        if not self.task_progress_file:
+            self.log("No ModuleInfo.txt file path available")
+            return False
+            
+        try:
+            # Read existing content if file exists
+            content = ""
+            if os.path.exists(self.task_progress_file):
+                with open(self.task_progress_file, 'r', encoding='utf-8') as f:
+                    content = f.read()
+            
+            # Remove existing [Tasks] section if it exists
+            if '[Tasks]' in content:
+                parts = content.split('[Tasks]')
+                before_tasks = parts[0].rstrip()
+                
+                # Look for next section after tasks
+                if len(parts) > 1:
+                    after_tasks_content = parts[1]
+                    lines = after_tasks_content.split('\n')
+                    next_section_start = -1
+                    
+                    for i, line in enumerate(lines):
+                        line = line.strip()
+                        if line.startswith('[') and line.endswith(']') and 'Completed' not in line:
+                            next_section_start = i
+                            break
+                    
+                    if next_section_start >= 0:
+                        # Preserve content after tasks section
+                        after_tasks = '\n' + '\n'.join(lines[next_section_start:])
+                    else:
+                        after_tasks = ""
+                else:
+                    after_tasks = ""
+                    
+                content = before_tasks + after_tasks
+            
+            # Add [Tasks] section
+            if not content.endswith('\n') and content:
+                content += '\n'
+            content += '[Tasks]\n'
+            
+            # Add each task with its completion status
+            for doc in self.doc_links:
+                task_name = doc['title']
+                is_completed = doc['href'] in self.completed_docs
+                completion_text = 'Yes' if is_completed else 'No'
+                content += f'[{task_name}] Completed {completion_text}\n'
+            
+            # Write back to file
+            # Create directory if it doesn't exist
+            os.makedirs(os.path.dirname(self.task_progress_file), exist_ok=True)
+            
+            with open(self.task_progress_file, 'w', encoding='utf-8') as f:
+                f.write(content)
+                
+            self.log(f"Saved task progress to ModuleInfo.txt: {self.task_progress_file}")
+            return True
+            
+        except Exception as e:
+            self.log(f"Error saving task progress: {e}")
+            return False
+
     def load_url(self, url):
         """Process URL and open it in browser"""
         try:
@@ -177,6 +421,9 @@ class GitBuildingWindow(QWidget):
                 
                 # Parse the HTML to extract documentation links
                 self.extract_doc_links()
+                
+                # Load task progress after extracting doc links
+                self.load_task_progress()
                 
                 # Update the list widget with the extracted links
                 self.populate_doc_list()
@@ -338,8 +585,8 @@ class GitBuildingWindow(QWidget):
                 
                 # Check if this doc is marked as completed
                 if doc['href'] in self.completed_docs:
-                    # Since we might not have an icon resource, just use color
-                    # item.setIcon(QIcon(":/checkmark.png"))
+                    # Mark completed items with gray color and checkmark prefix
+                    item.setText(f"✓ {doc['title']}")
                     item.setForeground(Qt.gray)
                 
                 self.list_widget.addItem(item)
@@ -358,8 +605,13 @@ class GitBuildingWindow(QWidget):
             # The href should already be the full path from our extraction
             doc_path = href
             
+            # Get the original title (without checkmark prefix)
+            original_title = item.text()
+            if original_title.startswith('✓ '):
+                original_title = original_title[2:]
+            
             # Log for debugging
-            self.log(f"Selected document: {item.text()} -> {doc_path}")
+            self.log(f"Selected document: {original_title} -> {doc_path}")
             
             # Update the current path to the selected document
             self.current_base_path = doc_path
@@ -367,7 +619,7 @@ class GitBuildingWindow(QWidget):
             # Update the content area
             self.content_area.setHtml(f"""
                 <div style="text-align: center;">
-                    <h2>{item.text()}</h2>
+                    <h2>{original_title}</h2>
                     <p>Click "Open in Browser" to view this document.</p>
                 </div>
             """)
@@ -403,21 +655,31 @@ class GitBuildingWindow(QWidget):
             item = selected_items[0]
             href = item.data(Qt.UserRole)
             
+            # Get the original title
+            original_title = item.text()
+            if original_title.startswith('✓ '):
+                original_title = original_title[2:]
+            
             if state == Qt.Checked:
                 # Mark as completed
                 self.completed_docs.add(href)
+                item.setText(f"✓ {original_title}")
                 item.setForeground(Qt.gray)
-                # Add checkmark icon if available
-                # item.setIcon(QIcon(":/checkmark.png"))
+                self.log(f"Marked as completed: {original_title}")
             else:
                 # Mark as not completed
                 if href in self.completed_docs:
                     self.completed_docs.remove(href)
+                item.setText(original_title)
                 item.setForeground(Qt.black)
-                # item.setIcon(QIcon())  # Remove icon
+                self.log(f"Marked as not completed: {original_title}")
                 
-            # TODO: Save completion status to a file for persistence
-            
+            # Save task progress to file
+            if self.save_task_progress():
+                self.log("Task progress saved successfully")
+            else:
+                self.log("Failed to save task progress")
+                
         except Exception as e:
             self.log(f"Error updating completion status: {e}")
 

@@ -31,7 +31,7 @@ class PandasModel(QAbstractTableModel):
         
     def columnCount(self, parent=QModelIndex()):
         return len(self._data.columns)
-    
+     
     def data(self, index, role=Qt.DisplayRole):
         if not index.isValid():
             return QVariant()

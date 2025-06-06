@@ -356,10 +356,6 @@ class GitFileReaderApp(QMainWindow):
         #docs handling
         docs_path = os.path.join("Downloaded Repositories", self.repo_folder, "RootModule", "orshards", "index.html")
         has_docs = os.path.exists(docs_path)
-
-        #risk assessment handling
-        #risk_path = 
-        #has_risk = 
         
         # Initialize modules dictionary with the root module
         self.modules = OrderedDict()

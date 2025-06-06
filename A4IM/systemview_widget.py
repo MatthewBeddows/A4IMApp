@@ -81,6 +81,7 @@ class NodeItem(QGraphicsRectItem):
         self.system_view = system_view
         self.node_type = node_type  # 'project' or 'module'
         self.completed = False  # Completion status
+        self.completion_status = 'not_started'  # 'not_started', 'in_progress', 'completed'
         self.parent_node = None  # Parent node
         self.child_nodes = []  # List of child nodes
         self.connected_lines = []  # List to store lines connected to this node
@@ -131,18 +132,47 @@ class NodeItem(QGraphicsRectItem):
         self.system_view.node_clicked(self)
         # Prevent default behavior
 
-    # Update the status indicator color
+    # Update the status indicator color based on completion status
     def update_status_indicator(self):
-        if self.completed:
+        print(f"Updating status indicator for {self.name}: completion_status = {self.completion_status}")
+        if self.completion_status == 'completed':
             self.status_indicator.setBrush(QBrush(QColor("#32CD32")))  # Lime green
+            print(f"  -> Set to GREEN (completed)")
+        elif self.completion_status == 'in_progress':
+            self.status_indicator.setBrush(QBrush(QColor("#F0AD4E")))  # Yellow
+            print(f"  -> Set to YELLOW (in_progress)")
         elif self.has_completed_children():
             self.status_indicator.setBrush(QBrush(QColor("#F0AD4E")))  # Yellow
+            print(f"  -> Set to YELLOW (has completed children)")
         else:
             self.status_indicator.setBrush(QBrush(QColor("#D9534F")))  # Red
+            print(f"  -> Set to RED (not_started)")
 
     # Update node color based on completion status
     def update_node_color(self):
         if self.node_type != 'project':
+            # For loading: if we already have a specific completion_status from file, respect it
+            if hasattr(self, 'data') and self.data and 'completion_status' in self.data:
+                self.completion_status = self.data['completion_status']
+                print(f"update_node_color for {self.name}: using loaded status = {self.completion_status}")
+            else:
+                # Determine the current status dynamically (for runtime changes)
+                if self.completed:
+                    self.completion_status = 'completed'
+                elif self.has_completed_children():
+                    # Only set to in_progress if not explicitly completed and not already set
+                    if self.completion_status not in ['completed', 'in_progress']:
+                        self.completion_status = 'in_progress'
+                        # Save the in_progress status to file
+                        if hasattr(self, 'data') and self.data:
+                            self.data['completion_status'] = 'in_progress'
+                            self.system_view.save_module_data_to_file(self.data)
+                else:
+                    if self.completion_status != 'completed':
+                        self.completion_status = 'not_started'
+                
+                print(f"update_node_color for {self.name}: determined status = {self.completion_status}")
+            
             self.update_status_indicator()
 
     # Check if any child modules are completed
@@ -438,6 +468,13 @@ class SystemView(QWidget):
         self.all_nodes = []  # Keep track of all nodes
         self.initialize_nodes()
 
+        # Update all node colors after all nodes are created
+        # This ensures proper status indication based on loaded data
+        for node in self.all_nodes:
+            if node.node_type == 'module':
+                print(f"Updating color for {node.name}: completion_status = {node.completion_status}")
+                node.update_node_color()
+
         # Adjust scene rectangle with extra space
         items_rect = self.graphics_scene.itemsBoundingRect()
         extra_space = 500
@@ -469,6 +506,10 @@ class SystemView(QWidget):
         for module_name, height in positions:
             module_data = modules[module_name]
             module_data['depth'] = depth  # Store depth for styling purposes
+            
+            # Load additional data from ModuleInfo.txt
+            self.load_module_data_from_file(module_data)
+            
             position = QPointF(x + spacing_x, current_y + height / 2)
             module_node = self.add_node(module_name, module_data, position, parent_node, depth)
             self.all_nodes.append(module_node)
@@ -481,6 +522,23 @@ class SystemView(QWidget):
     # Add a node (project or module)
     def add_node(self, name, data, position, parent_node, depth):
         node = NodeItem(name, data if data else {}, self, node_type='module' if parent_node else 'project')
+        
+        # Set completion status from loaded data
+        if data:
+            if 'completed' in data:
+                node.completed = data['completed']
+            
+            # Set the completion status for proper color handling
+            if 'completion_status' in data:
+                node.completion_status = data['completion_status']
+                print(f"Node {name}: loaded completion_status = {node.completion_status}")
+            else:
+                # Determine status based on completed flag for backward compatibility
+                node.completion_status = 'completed' if data.get('completed', False) else 'not_started'
+                print(f"Node {name}: determined completion_status = {node.completion_status}")
+        else:
+            node.completion_status = 'not_started'
+        
         node.setPos(position)
         node.setZValue(1)
         self.graphics_scene.addItem(node)
@@ -499,8 +557,126 @@ class SystemView(QWidget):
 
         self.node_items[node] = {'name': name, 'data': data}
 
+        # Update visual status after all children are loaded
+        # We'll do this in a separate pass
         return node
 
+    def load_module_data_from_file(self, module_data):
+        """Load assigned_to and completed status from ModuleInfo.txt"""
+        if not module_data or not isinstance(module_data, dict):
+            return
+            
+        repository_info = module_data.get('repository', {})
+        if not repository_info or not repository_info.get('name'):
+            return
+            
+        # Get the repository folder
+        repo_dir = os.path.join("Downloaded Repositories", self.parent.repo_folder)
+        module_dir = os.path.join(repo_dir, repository_info.get('name'))
+        
+        if not os.path.exists(module_dir):
+            return
+        
+        # Find ModuleInfo.txt file
+        module_info_path = self.find_module_info_file(module_dir)
+        
+        if not module_info_path:
+            return
+            
+        try:
+            with open(module_info_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # Parse for assigned_to
+            assigned_match = re.search(r'\[Team/Assigned\]\s*(.+)', content, re.IGNORECASE)
+            if assigned_match:
+                assigned_value = assigned_match.group(1).strip()
+                module_data['assigned_to'] = assigned_value if assigned_value else 'None'
+            else:
+                module_data['assigned_to'] = 'None'
+            
+            # Parse for completed status
+            completed_match = re.search(r'\[Completed\]\s*(.+)', content, re.IGNORECASE)
+            if completed_match:
+                completed_value = completed_match.group(1).strip().lower()
+                if completed_value in ['yes', 'true', '1']:
+                    module_data['completed'] = True
+                    module_data['completion_status'] = 'completed'
+                elif completed_value == 'in progress':
+                    module_data['completed'] = False
+                    module_data['completion_status'] = 'in_progress'
+                else:
+                    module_data['completed'] = False
+                    module_data['completion_status'] = 'not_started'
+            else:
+                module_data['completed'] = False
+                module_data['completion_status'] = 'not_started'
+                
+        except Exception as e:
+            print(f"Error loading module data from {module_info_path}: {str(e)}")
+            module_data['assigned_to'] = 'None'
+            module_data['completed'] = False
+            module_data['completion_status'] = 'not_started'
+
+    def save_module_data_to_file(self, module_data):
+        """Save assigned_to and completed status to ModuleInfo.txt"""
+        if not module_data or not isinstance(module_data, dict):
+            return False
+            
+        repository_info = module_data.get('repository', {})
+        if not repository_info or not repository_info.get('name'):
+            return False
+            
+        # Get the repository folder
+        repo_dir = os.path.join("Downloaded Repositories", self.parent.repo_folder)
+        module_dir = os.path.join(repo_dir, repository_info.get('name'))
+        
+        if not os.path.exists(module_dir):
+            return False
+        
+        # Find ModuleInfo.txt file
+        module_info_path = self.find_module_info_file(module_dir)
+        
+        if not module_info_path:
+            return False
+            
+        try:
+            # Read current content
+            with open(module_info_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            assigned_to = module_data.get('assigned_to', 'None')
+            
+            # Determine completion status text
+            completion_status = module_data.get('completion_status', 'not_started')
+            if completion_status == 'completed':
+                completed_text = 'Yes'
+            elif completion_status == 'in_progress':
+                completed_text = 'In progress'
+            else:
+                completed_text = 'No'
+            
+            # Update or add [Team/Assigned] line
+            if re.search(r'\[Team/Assigned\]', content, re.IGNORECASE):
+                content = re.sub(r'\[Team/Assigned\].*', f"[Team/Assigned] {assigned_to}", content, flags=re.IGNORECASE)
+            else:
+                content += f"\n[Team/Assigned] {assigned_to}"
+            
+            # Update or add [Completed] line
+            if re.search(r'\[Completed\]', content, re.IGNORECASE):
+                content = re.sub(r'\[Completed\].*', f"[Completed] {completed_text}", content, flags=re.IGNORECASE)
+            else:
+                content += f"\n[Completed] {completed_text}"
+            
+            # Write back to file
+            with open(module_info_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+                
+            return True
+            
+        except Exception as e:
+            print(f"Error saving module data to {module_info_path}: {str(e)}")
+            return False
 
     def update_parent_module_info(self, parent_name, new_module_address):
         """Update the parent module's moduleInfo.txt with the new module address"""
@@ -674,7 +850,10 @@ class SystemView(QWidget):
                         'name': repo_name,
                         'address': repo_url,
                         'docs_path': None
-                    }
+                    },
+                    'assigned_to': 'None',
+                    'completed': False,
+                    'completion_status': 'not_started'
                 }
                 
                 if parent_name == "Project Root":
@@ -840,23 +1019,54 @@ class SystemView(QWidget):
 
     # Finish editing assigned value
     def finish_editing(self):
-        new_text = self.assigned_edit.text()
-        if new_text:
-            self.assigned_value.setText(new_text)
-            self.assigned_value.setStyleSheet("color: black;")
-        else:
-            self.assigned_value.setText("None")
+        new_text = self.assigned_edit.text().strip()
+        if not new_text:
+            new_text = "None"
+            
+        self.assigned_value.setText(new_text)
+        if new_text == "None":
             self.assigned_value.setStyleSheet("color: #808080;")
+        else:
+            self.assigned_value.setStyleSheet("color: black;")
+            
         self.assigned_edit.hide()
         self.assigned_value.show()
+        
         # Update data structure with new assigned value
         if self.selected_node and isinstance(self.selected_node.data, dict):
             self.selected_node.data['assigned_to'] = new_text
+            # Save to ModuleInfo.txt
+            if self.save_module_data_to_file(self.selected_node.data):
+                print(f"Saved assigned_to: {new_text} to ModuleInfo.txt")
+            else:
+                print("Failed to save assigned_to to ModuleInfo.txt")
 
     # Handle completion checkbox state change
     def completion_status_changed(self, state):
         if self.selected_node:
             self.selected_node.completed = bool(state)
+            
+            # Update completion status
+            if bool(state):
+                self.selected_node.completion_status = 'completed'
+                self.selected_node.data['completion_status'] = 'completed'
+            else:
+                # When unchecked, determine if it should be in_progress or not_started
+                if self.selected_node.has_completed_children():
+                    self.selected_node.completion_status = 'in_progress'
+                    self.selected_node.data['completion_status'] = 'in_progress'
+                else:
+                    self.selected_node.completion_status = 'not_started'
+                    self.selected_node.data['completion_status'] = 'not_started'
+            
+            self.selected_node.data['completed'] = bool(state)
+            
+            # Save to ModuleInfo.txt
+            if self.save_module_data_to_file(self.selected_node.data):
+                print(f"Saved completed: {self.selected_node.completion_status} to ModuleInfo.txt")
+            else:
+                print("Failed to save completed status to ModuleInfo.txt")
+            
             self.selected_node.update_node_color()
             # Update parent module node status
             parent_node = self.selected_node.parent_node
@@ -1200,11 +1410,12 @@ class SystemView(QWidget):
                 return file_path
         
         # If no exact match is found, try a case-insensitive search
-        existing_files = os.listdir(module_dir)
-        for existing_file in existing_files:
-            lower_file = existing_file.lower()
-            if "moduleinfo" in lower_file or "moduleinfor" in lower_file:
-                return os.path.join(module_dir, existing_file)
+        if os.path.exists(module_dir):
+            existing_files = os.listdir(module_dir)
+            for existing_file in existing_files:
+                lower_file = existing_file.lower()
+                if "moduleinfo" in lower_file or "moduleinfor" in lower_file:
+                    return os.path.join(module_dir, existing_file)
         
         return None  # No matching file found
 
