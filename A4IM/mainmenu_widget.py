@@ -45,9 +45,8 @@ class MainMenuWidget(QWidget):
 
         # Buttons
         buttons = [
-            ("Construct", self.parent.show_system_view),
-            ("User Docs", self.show_docs),
-            ("About", self.show_about),
+            ("Project Overview", self.show_intro),
+            ("System View", self.parent.show_system_view),
             ("Exit", self.parent.close)
         ]
 
@@ -83,8 +82,8 @@ class MainMenuWidget(QWidget):
         """)
         return button
 
-    def show_docs(self):
-        print("User Docs button clicked")
+    def show_intro(self):
+        print("Intro button clicked")
 
     def show_about(self):
         print("About button clicked")

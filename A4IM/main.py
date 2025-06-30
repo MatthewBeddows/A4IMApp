@@ -512,11 +512,10 @@ def main():
     QCoreApplication.setAttribute(Qt.AA_UseSoftwareOpenGL, True)
     QCoreApplication.setAttribute(Qt.AA_ShareOpenGLContexts, True)
 
-
-    # Import here to avoid circular imports
-    from RepositorySelector_widget import RepositorySelector
-    selector = RepositorySelector()
-    selector.show()
+    # Import and show the Startup Menu (FIRST WINDOW)
+    from startup_menu import StartupMenu
+    startup = StartupMenu()
+    startup.show()
     return app.exec_()
 
 if __name__ == "__main__":
