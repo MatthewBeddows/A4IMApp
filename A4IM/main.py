@@ -59,12 +59,14 @@ class GitFileReaderApp(QMainWindow):
         self.download_initial_repository()
 
     def download_initial_repository(self):
-        """Download the initial repository and add timestamp to ModuleInfo.txt"""
         import datetime
+        
+        # Extract repo name from URL at the beginning
+        repo_name = self.initial_repo_url.split('/')[-1]
         
         download_dir = os.path.join(os.getcwd(), "Downloaded Repositories")
         repo_dir = os.path.join(download_dir, self.repo_folder)
-        clone_folder = os.path.join(repo_dir, "RootModule")
+        clone_folder = os.path.join(repo_dir, repo_name)  # Use repo_name instead of "RootModule"
 
         if not os.path.exists(download_dir):
             os.makedirs(download_dir)
@@ -350,11 +352,9 @@ class GitFileReaderApp(QMainWindow):
                 address = address.replace("github.com/", "", address.count("github.com") - 1)
             cleaned_addresses.append(address)  # Fixed: using 'address' instead of 'addr'
         
-        # Create the root module entry
+        # docs handling - use the extracted repo_name instead of "RootModule"
         repo_name = self.initial_repo_url.split('/')[-1]
-
-        #docs handling
-        docs_path = os.path.join("Downloaded Repositories", self.repo_folder, "RootModule", "orshards", "index.html")
+        docs_path = os.path.join("Downloaded Repositories", self.repo_folder, repo_name, "orshards", "index.html")
         has_docs = os.path.exists(docs_path)
         
         # Initialize modules dictionary with the root module
