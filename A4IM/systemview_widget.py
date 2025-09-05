@@ -481,18 +481,17 @@ class SystemView(QWidget):
         items_rect.adjust(-extra_space, -extra_space, extra_space, extra_space)
         self.graphics_scene.setSceneRect(items_rect)
 
-    # Initialize nodes recursively
     def initialize_nodes(self):
-        # Create the Project Node
-        self.project_node = self.add_node("A4IM Scanner", None, position=QPointF(0, 0), parent_node=None, depth=0)
-        self.layout_modules(self.modules_data, parent_node=self.project_node, depth=1, x=0, y=0)
+        # Remove the project node creation - start directly with modules
+        self.layout_modules(self.modules_data, parent_node=None, depth=0, x=0, y=0)
 
-    # Layout modules recursively
+
     def layout_modules(self, modules, parent_node, depth, x, y):
         spacing_x = 200
         spacing_y = 150
         total_height = 0
         positions = []
+        
         # First, calculate the total height needed
         for module_name in modules:
             child_modules = modules[module_name].get('submodules', {})
@@ -510,18 +509,24 @@ class SystemView(QWidget):
             # Load additional data from ModuleInfo.txt
             self.load_module_data_from_file(module_data)
             
-            position = QPointF(x + spacing_x, current_y + height / 2)
+            # If parent_node is None (root level), position at x=0, otherwise offset
+            pos_x = x if parent_node is None else x + spacing_x
+            position = QPointF(pos_x, current_y + height / 2)
+            
+            # Create node - will be 'module' type since we removed project type logic
             module_node = self.add_node(module_name, module_data, position, parent_node, depth)
             self.all_nodes.append(module_node)
+            
             # Recurse into child modules
             child_modules = module_data.get('submodules', {})
             if child_modules:
-                self.layout_modules(child_modules, module_node, depth + 1, x + spacing_x, position.y())
+                self.layout_modules(child_modules, module_node, depth + 1, pos_x, position.y())
             current_y += height
 
     # Add a node (project or module)
     def add_node(self, name, data, position, parent_node, depth):
-        node = NodeItem(name, data if data else {}, self, node_type='module' if parent_node else 'project')
+        # All nodes are now 'module' type since we removed the project node
+        node = NodeItem(name, data if data else {}, self, node_type='module')
         
         # Set completion status from loaded data
         if data:
@@ -556,10 +561,8 @@ class SystemView(QWidget):
             parent_node.connected_lines.append(line)
 
         self.node_items[node] = {'name': name, 'data': data}
-
-        # Update visual status after all children are loaded
-        # We'll do this in a separate pass
         return node
+
 
     def load_module_data_from_file(self, module_data):
         """Load assigned_to and completed status from ModuleInfo.txt"""
@@ -934,45 +937,35 @@ class SystemView(QWidget):
         else:
             self.assigned_value.setStyleSheet("color: black;")
 
-        # Show completion checkbox for modules (not for project node)
-        if node.node_type == 'module':
-            self.completion_checkbox.show()
-            self.completion_checkbox.blockSignals(True)
-            self.completion_checkbox.setChecked(node.completed)
-            self.completion_checkbox.blockSignals(False)
+        # Show completion checkbox for all nodes (since they're all modules now)
+        self.completion_checkbox.show()
+        self.completion_checkbox.blockSignals(True)
+        self.completion_checkbox.setChecked(node.completed)
+        self.completion_checkbox.blockSignals(False)
 
-            # Check if module has docs
-            doc_file_path = self.check_module_documentation(data)
-            if doc_file_path:
-                self.construct_button.show()
-            else:
-                self.construct_button.hide()
-
-            # Check if risk assessment
-            risk_file_path = self.check_risk_assessment_file(data)
-            if risk_file_path:
-                self.risk_button.show()
-            else:
-                self.risk_button.hide()
-
-            # Check for BOM file in lib folder
-            has_bom = self.check_for_bom_file(data)
-            if has_bom:
-                self.view_bom_button.setText("View Module BOM")
-                self.view_bom_button.clicked.disconnect()
-                self.view_bom_button.clicked.connect(self.view_module_bom)
-                self.view_bom_button.show()
-            else:
-                # Hide the BOM button if there's no BOM file
-                self.view_bom_button.hide()
-
+        # Check if module has docs
+        doc_file_path = self.check_module_documentation(data)
+        if doc_file_path:
+            self.construct_button.show()
         else:
-            # For project node
-            self.completion_checkbox.hide()
             self.construct_button.hide()
+
+        # Check if risk assessment
+        risk_file_path = self.check_risk_assessment_file(data)
+        if risk_file_path:
+            self.risk_button.show()
+        else:
             self.risk_button.hide()
 
-            # Update View BOM button for project node
+        # Check for BOM file in lib folder
+        has_bom = self.check_for_bom_file(data)
+        if has_bom:
+            self.view_bom_button.setText("View Module BOM")
+            self.view_bom_button.clicked.disconnect()
+            self.view_bom_button.clicked.connect(self.view_module_bom)
+            self.view_bom_button.show()
+        else:
+            # For nodes without BOM, show project info instead
             self.view_bom_button.setText("View Project Info")
             self.view_bom_button.clicked.disconnect()
             self.view_bom_button.clicked.connect(self.view_project_info)
@@ -1215,36 +1208,27 @@ class SystemView(QWidget):
         if not os.path.exists(module_dir):
             return None
         
-        # Check for documentation file
-        doc_path = os.path.join(module_dir, "src", "doc", "_site", "missing.html")
+        # Recursively search for index.html files
+        def find_index_html(directory):
+            """Recursively search for index.html files"""
+            found_files = []
+            try:
+                for root, dirs, files in os.walk(directory):
+                    for file in files:
+                        if file.lower() == 'index.html':
+                            full_path = os.path.join(root, file)
+                            found_files.append(full_path)
+            except Exception as e:
+                pass
+            return found_files
         
-        # Also check with src in different capitalizations
-        alt_paths = [
-            os.path.join(module_dir, "Src", "doc", "_site", "missing.html"),
-            os.path.join(module_dir, "SRC", "doc", "_site", "missing.html"),
-            # Check with Doc variations
-            os.path.join(module_dir, "src", "Doc", "_site", "missing.html"),
-            os.path.join(module_dir, "src", "DOC", "_site", "missing.html"),
-            # Check with _site variations
-            os.path.join(module_dir, "src", "doc", "_Site", "missing.html"),
-            os.path.join(module_dir, "src", "doc", "_SITE", "missing.html"),
-            # Check with missing.html variations
-            os.path.join(module_dir, "src", "doc", "_site", "Missing.html"),
-            os.path.join(module_dir, "src", "doc", "_site", "MISSING.html"),
-            # Common alternative capitalization combinations
-            os.path.join(module_dir, "Src", "Doc", "_Site", "Missing.html"),
-            os.path.join(module_dir, "SRC", "DOC", "_SITE", "MISSING.html"),
-        ]
+        # Search for all index.html files
+        found_files = find_index_html(module_dir)
         
-        # Check main path first
-        if os.path.exists(doc_path):
-            return doc_path
+        # If we found files, return the first one
+        if found_files:
+            return found_files[0]
         
-        # Then check alternative paths
-        for path in alt_paths:
-            if os.path.exists(path):
-                return path
-                
         return None
                 
     # Recenter the graphics view
