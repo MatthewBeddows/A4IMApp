@@ -518,5 +518,14 @@ def main():
     startup.show()
     return app.exec_()
 
+def closeEvent(self, event):
+    """Called when the application is closing"""
+    # Clean up temporary CSV files
+    if hasattr(self, 'system_view'):
+        self.system_view.cleanup_temp_files()
+    
+    # Accept the close event
+    event.accept()
+
 if __name__ == "__main__":
     sys.exit(main())

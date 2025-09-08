@@ -1,13 +1,14 @@
 from PyQt5.QtWidgets import (
     QDialog, QFormLayout, QComboBox, QDialogButtonBox, QWidget, QHBoxLayout, QVBoxLayout, QTextEdit, QPushButton, QLabel, QLineEdit, QCheckBox,
     QGraphicsView, QGraphicsScene, QGraphicsRectItem, QGraphicsTextItem,
-    QGraphicsLineItem, QGraphicsItem, QGraphicsPixmapItem, QMessageBox, QApplication
+    QGraphicsLineItem, QGraphicsItem, QGraphicsPixmapItem, QMessageBox, QApplication, QRadioButton, QButtonGroup
 )
 from PyQt5.QtCore import Qt, QPointF, QRectF, QLineF
 from PyQt5.QtGui import QFont, QColor, QPen, QBrush, QPainter, QPixmap
 from PyQt5.QtCore import QUrl
 import math
 import os
+import tempfile
 import re  # For regex operations to strip text in square brackets
 import pygit2
 import subprocess
@@ -429,6 +430,22 @@ class SystemView(QWidget):
         self.view_bom_button = self.create_button("View Module BOM")
         self.view_bom_button.clicked.connect(self.view_module_bom)
         right_layout.addWidget(self.view_bom_button)
+
+        # Add these new CSV buttons
+        self.inventory_button = self.create_button("View Inventory")
+        self.inventory_button.clicked.connect(self.view_inventory_csv)
+        self.inventory_button.hide()
+        right_layout.addWidget(self.inventory_button)
+
+        self.parts_button = self.create_button("View Parts")
+        self.parts_button.clicked.connect(self.view_parts_csv)
+        self.parts_button.hide()
+        right_layout.addWidget(self.parts_button)
+
+        self.materials_button = self.create_button("View Materials")
+        self.materials_button.clicked.connect(self.view_materials_csv)
+        self.materials_button.hide()
+        right_layout.addWidget(self.materials_button)
 
         back_button = self.create_button("Back")
         back_button.clicked.connect(self.parent.show_main_menu)
@@ -967,39 +984,79 @@ class SystemView(QWidget):
             else:
                 self.construct_button.hide()
 
-            # Check if risk assessment CSV exists
-            risk_file_path = self.check_risk_assessment_file(data)
-            if risk_file_path:
+            # Check if risk assessment exists (current + children)
+            if self.has_csv_in_children(node, self.check_risk_assessment_file):
                 self.risk_button.show()
             else:
                 self.risk_button.hide()
 
-            # Check for BOM file in lib folder
-            has_bom = self.check_for_bom_file(data)
-            if has_bom:
-                self.view_bom_button.setText("View Module BOM")
-                self.view_bom_button.clicked.disconnect()
-                self.view_bom_button.clicked.connect(self.view_module_bom)
+            # Check for BOM files (current + children)
+            if self.has_csv_in_children(node, self.check_for_bom_file):
                 self.view_bom_button.show()
             else:
-                # Hide the BOM button if there's no BOM file
                 self.view_bom_button.hide()
+
+            # Check for inventory files (current + children)
+            if self.has_csv_in_children(node, self.check_for_inventory_csv):
+                self.inventory_button.show()
+            else:
+                self.inventory_button.hide()
+
+            # Check for parts files (current + children)
+            if self.has_csv_in_children(node, self.check_for_parts_csv):
+                self.parts_button.show()
+            else:
+                self.parts_button.hide()
+
+            # Check for materials files (current + children)
+            if self.has_csv_in_children(node, self.check_for_materials_csv):
+                self.materials_button.show()
+            else:
+                self.materials_button.hide()
 
         else:
             # For project node
             self.completion_checkbox.hide()
             self.construct_button.hide()
-            self.risk_button.hide()
+            
+            # Check if risk assessment exists in children for project node
+            if self.has_csv_in_children(node, self.check_risk_assessment_file):
+                self.risk_button.show()
+            else:
+                self.risk_button.hide()
 
-            # Update View BOM button for project node
-            self.view_bom_button.setText("View Project Info")
-            self.view_bom_button.clicked.disconnect()
-            self.view_bom_button.clicked.connect(self.view_project_info)
-            self.view_bom_button.show()
+            # Check for BOM files in children for project node
+            if self.has_csv_in_children(node, self.check_for_bom_file):
+                self.view_bom_button.setText("View Module BOM")
+                self.view_bom_button.clicked.disconnect()
+                self.view_bom_button.clicked.connect(self.view_module_bom)
+                self.view_bom_button.show()
+            else:
+                # Update View BOM button for project node when no BOM files
+                self.view_bom_button.setText("View Project Info")
+                self.view_bom_button.clicked.disconnect()
+                self.view_bom_button.clicked.connect(self.view_project_info)
+                self.view_bom_button.show()
 
-        # If in toggle mode and a module node is clicked, update the display
-        if self.toggle_mode:
-            self.update_toggle_view(node)
+            # Check for CSV files in children for project node
+            if self.has_csv_in_children(node, self.check_for_inventory_csv):
+                self.inventory_button.show()
+            else:
+                self.inventory_button.hide()
+
+            if self.has_csv_in_children(node, self.check_for_parts_csv):
+                self.parts_button.show()
+            else:
+                self.parts_button.hide()
+
+            if self.has_csv_in_children(node, self.check_for_materials_csv):
+                self.materials_button.show()
+            else:
+                self.materials_button.hide()
+
+                # If in toggle mode and a module node is clicked, update the display
+                if self.toggle_mode:
+                    self.update_toggle_view(node)
 
     def get_button_style(self):
         return """
@@ -1098,32 +1155,21 @@ class SystemView(QWidget):
         if not self.selected_node:
             QMessageBox.warning(self, "Error", "No module selected.")
             return
-            
-        # Get repository information
-        repository_info = self.selected_node.data.get('repository', {})
-        if not repository_info or not repository_info.get('name'):
-            QMessageBox.warning(self, "Error", "No repository information available for this module.")
-            return
-            
-        # Get the repository folder
-        repo_dir = os.path.join("Downloaded Repositories", self.parent.repo_folder)
-        module_dir = os.path.join(repo_dir, repository_info.get('name'))
         
-        if not os.path.exists(module_dir):
-            QMessageBox.warning(self, "Error", f"Module directory does not exist: {module_dir}")
-            return
+        # Find BOM files in current node and all children
+        bom_files = self.find_csv_in_children(self.selected_node, self.check_for_bom_file)
         
-        # Check specifically for BOM.csv in the lib folder as requested
-        lib_folder = os.path.join(module_dir, "lib")
-        bom_file = os.path.join(lib_folder, "BOM.csv")
-        
-        # If the lib/BOM.csv exists, open it directly
-        if os.path.exists(bom_file):
-            self.open_csv_in_viewer(bom_file)
-        else:
-            # If lib/BOM.csv doesn't exist, inform the user
+        if not bom_files:
             QMessageBox.information(self, "BOM File Not Found", 
-                                "No BOM.csv file was found in the lib folder for this module.")
+                                "No BOM.csv file was found in this module or its sub-modules.")
+            return
+        
+        if len(bom_files) == 1:
+            # Only one BOM file found, open it directly
+            self.open_csv_in_viewer(bom_files[0]['path'])
+        else:
+            # Multiple BOM files found, show aggregation dialog
+            self.show_csv_aggregation_dialog(bom_files, "BOM")
 
     def open_csv_in_viewer(self, csv_path):
         """Open a CSV file in the CSV viewer"""
@@ -1157,29 +1203,29 @@ class SystemView(QWidget):
     def check_for_bom_file(self, module_data):
         """Check if a module has a BOM.csv file in the lib folder"""
         if not module_data or not isinstance(module_data, dict):
-            return False
+            return None  # Changed from False to None
                 
         repository_info = module_data.get('repository', {})
         if not repository_info or not repository_info.get('name'):
-            return False
+            return None  # Changed from False to None
                 
         # Get the repository folder
         repo_dir = os.path.join("Downloaded Repositories", self.parent.repo_folder)
         module_dir = os.path.join(repo_dir, repository_info.get('name'))
         
         if not os.path.exists(module_dir):
-            return False
+            return None  # Changed from False to None
         
         # Check specifically for BOM.csv in the lib folder
         lib_folder = os.path.join(module_dir, "lib")
         
         # First check if lib folder exists
         if not os.path.exists(lib_folder) or not os.path.isdir(lib_folder):
-            return False
+            return None  # Changed from False to None
             
         # Then check for BOM.csv file
         bom_file = os.path.join(lib_folder, "BOM.csv")
-        return os.path.exists(bom_file)
+        return bom_file if os.path.exists(bom_file) else None  # Return the path, not True/False
 
 
     # View project info
@@ -1481,17 +1527,305 @@ class SystemView(QWidget):
         return None
 
     def open_risk_assessment(self):
-        """Open the risk assessment CSV file for the selected module in the CSV viewer"""
-        if not self.selected_node or not isinstance(self.selected_node.data, dict):
-            QMessageBox.warning(self, "Error", "No module selected or invalid module data.")
+        """Open the risk assessment file for the selected module"""
+        if not self.selected_node:
+            QMessageBox.warning(self, "Error", "No module selected.")
             return
-            
-        risk_file_path = self.check_risk_assessment_file(self.selected_node.data)
         
-        if not risk_file_path:
+        # Find risk assessment files in current node and all children
+        risk_files = self.find_csv_in_children(self.selected_node, self.check_risk_assessment_file)
+        
+        if not risk_files:
             QMessageBox.information(self, "Risk Assessment", 
-                                "No risk assessment CSV file found for this module.")
+                                "No risk assessment file found for this module or its sub-modules.")
             return
         
-        # Open the CSV file in the CSV viewer
-        self.open_csv_in_viewer(risk_file_path)
+        if len(risk_files) == 1:
+            # Only one file found, open it directly
+            self.open_csv_in_viewer(risk_files[0]['path'])
+        else:
+            # Multiple files found, show aggregation dialog
+            self.show_csv_aggregation_dialog(risk_files, "Risk Assessment")
+
+
+    def find_csv_in_children(self, node, csv_checker_method):
+        """Recursively find CSV files in child nodes using the specified checker method"""
+        csv_files = []
+        
+        # Check current node
+        csv_path = csv_checker_method(node.data)
+        if csv_path:
+            csv_files.append({
+                'node_name': node.name,
+                'path': csv_path,
+                'node': node
+            })
+        
+        # Recursively check all child nodes
+        for child_node in node.child_nodes:
+            child_csvs = self.find_csv_in_children(child_node, csv_checker_method)
+            csv_files.extend(child_csvs)
+        
+        return csv_files
+
+    def has_csv_in_children(self, node, csv_checker_method):
+        """Check if any child nodes have the specified CSV type"""
+        csv_files = self.find_csv_in_children(node, csv_checker_method)
+        return len(csv_files) > 0
+
+    def show_csv_aggregation_dialog(self, csv_files, csv_type):
+        """Show dialog to choose between single or aggregated CSV"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Load {csv_type}")
+        dialog.setMinimumSize(400, 300)
+        
+        layout = QVBoxLayout()
+        
+        # Instructions
+        instructions = QLabel(f"Multiple {csv_type} files found. Choose an option:")
+        instructions.setFont(QFont('Arial', 12))
+        layout.addWidget(instructions)
+        
+        # Radio buttons for options
+        self.csv_choice_group = QButtonGroup()
+        
+        # Option 1: Current node only
+        current_radio = QRadioButton(f"View {csv_type} for current module only")
+        current_radio.setChecked(True)
+        self.csv_choice_group.addButton(current_radio, 0)
+        layout.addWidget(current_radio)
+        
+        # Option 2: Aggregated
+        aggregated_radio = QRadioButton(f"View aggregated {csv_type} from all sub-modules")
+        self.csv_choice_group.addButton(aggregated_radio, 1)
+        layout.addWidget(aggregated_radio)
+        
+        # List of files found
+        files_label = QLabel(f"\n{csv_type} files found in:")
+        files_label.setFont(QFont('Arial', 10, QFont.Bold))
+        layout.addWidget(files_label)
+        
+        files_list = QTextEdit()
+        files_list.setMaximumHeight(120)
+        files_list.setReadOnly(True)
+        
+        file_text = ""
+        for csv_file in csv_files:
+            # Strip text in square brackets from node name
+            display_name = re.sub(r'\[.*?\]', '', csv_file['node_name']).strip()
+            file_text += f"• {display_name}\n"
+        
+        files_list.setPlainText(file_text)
+        layout.addWidget(files_list)
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        
+        open_button = QPushButton("Open")
+        open_button.setStyleSheet(self.get_button_style())
+        open_button.clicked.connect(dialog.accept)
+        
+        cancel_button = QPushButton("Cancel")
+        cancel_button.setStyleSheet(self.get_button_style())
+        cancel_button.clicked.connect(dialog.reject)
+        
+        button_layout.addWidget(open_button)
+        button_layout.addWidget(cancel_button)
+        layout.addLayout(button_layout)
+        
+        dialog.setLayout(layout)
+        
+        if dialog.exec_() == QDialog.Accepted:
+            choice = self.csv_choice_group.checkedId()
+            if choice == 0:
+                # Open current node only
+                current_node_csv = next((f for f in csv_files if f['node'] == self.selected_node), None)
+                if current_node_csv:
+                    self.open_csv_in_viewer(current_node_csv['path'])
+            elif choice == 1:
+                # Create aggregated CSV
+                self.create_and_open_aggregated_csv(csv_files, csv_type)
+
+    def create_and_open_aggregated_csv(self, csv_files, csv_type):
+        """Create an aggregated CSV from multiple CSV files"""
+        try:
+            import pandas as pd
+            
+            all_dataframes = []
+            
+            for csv_file in csv_files:
+                try:
+                    # Read each CSV
+                    df = pd.read_csv(csv_file['path'])
+                    
+                    # Add a column to identify source module
+                    display_name = re.sub(r'\[.*?\]', '', csv_file['node_name']).strip()
+                    df['Source_Module'] = display_name
+                    
+                    all_dataframes.append(df)
+                    
+                except Exception as e:
+                    print(f"Error reading CSV from {csv_file['node_name']}: {str(e)}")
+                    continue
+            
+            if not all_dataframes:
+                QMessageBox.warning(self, "Error", "Could not read any CSV files for aggregation.")
+                return
+            
+            # Combine all dataframes
+            combined_df = pd.concat(all_dataframes, ignore_index=True, sort=False)
+            
+            # Create temporary file
+            temp_file = tempfile.NamedTemporaryFile(mode='w', suffix=f'_aggregated_{csv_type.lower()}.csv', delete=False)
+            temp_path = temp_file.name
+            temp_file.close()
+            
+            # Save combined data
+            combined_df.to_csv(temp_path, index=False)
+            
+            # Open in CSV viewer
+            self.open_csv_in_viewer(temp_path)
+            
+            # Store temp file path for cleanup later
+            if not hasattr(self, 'temp_csv_files'):
+                self.temp_csv_files = []
+            self.temp_csv_files.append(temp_path)
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to create aggregated CSV: {str(e)}")
+
+    def cleanup_temp_files(self):
+        """Clean up temporary aggregated CSV files"""
+        if hasattr(self, 'temp_csv_files'):
+            for temp_file in self.temp_csv_files:
+                try:
+                    os.unlink(temp_file)
+                except:
+                    pass
+            self.temp_csv_files = []
+
+    def view_inventory_csv(self):
+        """Open inventory CSV"""
+        if not self.selected_node:
+            return
+        
+        inventory_files = self.find_csv_in_children(self.selected_node, self.check_for_inventory_csv)
+        
+        if not inventory_files:
+            return
+        
+        if len(inventory_files) == 1:
+            self.open_csv_in_viewer(inventory_files[0]['path'])
+        else:
+            self.show_csv_aggregation_dialog(inventory_files, "Inventory")
+
+    def view_parts_csv(self):
+        """Open parts CSV"""
+        if not self.selected_node:
+            return
+        
+        parts_files = self.find_csv_in_children(self.selected_node, self.check_for_parts_csv)
+        
+        if not parts_files:
+            return
+        
+        if len(parts_files) == 1:
+            self.open_csv_in_viewer(parts_files[0]['path'])
+        else:
+            self.show_csv_aggregation_dialog(parts_files, "Parts")
+
+    def check_for_specific_csv(self, module_data, csv_name, folder_path=""):
+        """Check if a specific named CSV exists in a module"""
+        if not module_data or not isinstance(module_data, dict):
+            return None
+            
+        repository_info = module_data.get('repository', {})
+        if not repository_info or not repository_info.get('name'):
+            return None
+            
+        # Get the repository folder
+        repo_dir = os.path.join("Downloaded Repositories", self.parent.repo_folder)
+        module_dir = os.path.join(repo_dir, repository_info.get('name'))
+        
+        if not os.path.exists(module_dir):
+            return None
+        
+        # Build the full path to the CSV
+        if folder_path:
+            csv_path = os.path.join(module_dir, folder_path, csv_name)
+        else:
+            csv_path = os.path.join(module_dir, csv_name)
+        
+        return csv_path if os.path.exists(csv_path) else None
+
+    def check_for_inventory_csv(self, module_data):
+        """Check for inventory.csv in various locations"""
+        possible_files = [
+            ("inventory.csv", ""),
+            ("Inventory.csv", ""),
+            ("INVENTORY.csv", ""),
+            ("inventory.csv", "lib"),
+            ("Inventory.csv", "lib"),
+            ("inventory.csv", "data"),
+            ("Inventory.csv", "data"),
+        ]
+        
+        for csv_name, folder in possible_files:
+            path = self.check_for_specific_csv(module_data, csv_name, folder)
+            if path:
+                return path
+        return None
+
+    def check_for_parts_csv(self, module_data):
+        """Check for parts.csv in various locations"""
+        possible_files = [
+            ("parts.csv", ""),
+            ("Parts.csv", ""),
+            ("PARTS.csv", ""),
+            ("parts.csv", "lib"),
+            ("Parts.csv", "lib"),
+            ("parts.csv", "data"),
+            ("Parts.csv", "data"),
+            ("partslist.csv", ""),
+            ("PartsList.csv", ""),
+            ("parts_list.csv", ""),
+        ]
+        
+        for csv_name, folder in possible_files:
+            path = self.check_for_specific_csv(module_data, csv_name, folder)
+            if path:
+                return path
+        return None
+
+    def check_for_materials_csv(self, module_data):
+        """Check for materials.csv in various locations"""
+        possible_files = [
+            ("materials.csv", ""),
+            ("Materials.csv", ""),
+            ("MATERIALS.csv", ""),
+            ("materials.csv", "lib"),
+            ("Materials.csv", "lib"),
+            ("materials.csv", "data"),
+            ("Materials.csv", "data"),
+        ]
+        
+        for csv_name, folder in possible_files:
+            path = self.check_for_specific_csv(module_data, csv_name, folder)
+            if path:
+                return path
+        return None
+
+    def view_materials_csv(self):
+        """Open materials CSV"""
+        if not self.selected_node:
+            return
+        
+        materials_files = self.find_csv_in_children(self.selected_node, self.check_for_materials_csv)
+        
+        if not materials_files:
+            return
+        
+        if len(materials_files) == 1:
+            self.open_csv_in_viewer(materials_files[0]['path'])
+        else:
+            self.show_csv_aggregation_dialog(materials_files, "Materials")
