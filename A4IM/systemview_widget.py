@@ -1532,7 +1532,10 @@ class SystemView(QWidget):
             QMessageBox.warning(self, "Error", "No module selected.")
             return
         
-        # Find risk assessment files in current node and all children
+        # First check if current node has its own risk assessment
+        current_node_risk = self.check_risk_assessment_file(self.selected_node.data)
+        
+        # Then find all risk assessment files in current node and children
         risk_files = self.find_csv_in_children(self.selected_node, self.check_risk_assessment_file)
         
         if not risk_files:
@@ -1540,12 +1543,33 @@ class SystemView(QWidget):
                                 "No risk assessment file found for this module or its sub-modules.")
             return
         
-        if len(risk_files) == 1:
-            # Only one file found, open it directly
-            self.open_csv_in_viewer(risk_files[0]['path'])
+        # Check if current node has its own file
+        if current_node_risk:
+            # Current node has its own risk assessment
+            if len(risk_files) == 1:
+                # Only current node has risk assessment
+                self.open_csv_in_viewer(risk_files[0]['path'])
+            else:
+                # Current node + children have risk assessments - show choice dialog
+                self.show_csv_aggregation_dialog(risk_files, "Risk Assessment")
         else:
-            # Multiple files found, show aggregation dialog
-            self.show_csv_aggregation_dialog(risk_files, "Risk Assessment")
+            # Current node doesn't have its own risk assessment, but children do
+            # Show informational dialog first
+            reply = QMessageBox.question(
+                self, "Risk Assessment", 
+                f"This module does not have its own risk assessment file.\n\n"
+                f"However, {len(risk_files)} risk assessment file(s) were found in sub-modules.\n\n"
+                f"Would you like to view the aggregated risk assessments from sub-modules?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
+            )
+            
+            if reply == QMessageBox.Yes:
+                if len(risk_files) == 1:
+                    # Only one child has risk assessment - open it directly
+                    self.open_csv_in_viewer(risk_files[0]['path'])
+                else:
+                    # Multiple children have risk assessments - create aggregated view directly
+                    self.create_and_open_aggregated_csv(risk_files, "Risk Assessment")
 
 
     def find_csv_in_children(self, node, csv_checker_method):
