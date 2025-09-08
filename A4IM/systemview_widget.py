@@ -240,7 +240,9 @@ class SystemView(QWidget):
         self.selected_node = None
         self.toggle_mode = False  # Toggle mode flag
         self.modules_data = {}  # Store modules data
+        self.project_name = None  # Store the project name dynamically
         self.setup_ui()
+
 
     def setup_ui(self):
         layout = QHBoxLayout()
@@ -460,9 +462,25 @@ class SystemView(QWidget):
         """)
         return button
 
-    # Populate modules in graphics scene
-    def populate_modules(self, modules):
+     # Populate modules in graphics scene
+    def populate_modules(self, modules, project_name=None):
         self.modules_data = modules  # Store modules data for later use
+        
+        # Set the project name - try multiple sources
+        if project_name:
+            self.project_name = project_name
+        elif hasattr(self.parent, 'project_name') and self.parent.project_name:
+            self.project_name = self.parent.project_name
+        elif hasattr(self.parent, 'architect_folder') and self.parent.architect_folder:
+            # Use the architect folder name as project name
+            self.project_name = self.parent.architect_folder
+        else:
+            # Fallback to first module name or default
+            if modules:
+                self.project_name = list(modules.keys())[0] + " Project"
+            else:
+                self.project_name = "Project"
+        
         self.graphics_scene.clear()
         self.node_items.clear()
         self.all_nodes = []  # Keep track of all nodes
@@ -481,17 +499,19 @@ class SystemView(QWidget):
         items_rect.adjust(-extra_space, -extra_space, extra_space, extra_space)
         self.graphics_scene.setSceneRect(items_rect)
 
+
+    # Initialize nodes recursively
     def initialize_nodes(self):
-        # Remove the project node creation - start directly with modules
+        # Start directly with the modules - no separate project node needed
+        # The first architect module becomes the root
         self.layout_modules(self.modules_data, parent_node=None, depth=0, x=0, y=0)
 
-
+    # Layout modules recursively
     def layout_modules(self, modules, parent_node, depth, x, y):
         spacing_x = 200
         spacing_y = 150
         total_height = 0
         positions = []
-        
         # First, calculate the total height needed
         for module_name in modules:
             child_modules = modules[module_name].get('submodules', {})
@@ -509,24 +529,18 @@ class SystemView(QWidget):
             # Load additional data from ModuleInfo.txt
             self.load_module_data_from_file(module_data)
             
-            # If parent_node is None (root level), position at x=0, otherwise offset
-            pos_x = x if parent_node is None else x + spacing_x
-            position = QPointF(pos_x, current_y + height / 2)
-            
-            # Create node - will be 'module' type since we removed project type logic
+            position = QPointF(x + spacing_x, current_y + height / 2)
             module_node = self.add_node(module_name, module_data, position, parent_node, depth)
             self.all_nodes.append(module_node)
-            
             # Recurse into child modules
             child_modules = module_data.get('submodules', {})
             if child_modules:
-                self.layout_modules(child_modules, module_node, depth + 1, pos_x, position.y())
+                self.layout_modules(child_modules, module_node, depth + 1, x + spacing_x, position.y())
             current_y += height
 
     # Add a node (project or module)
     def add_node(self, name, data, position, parent_node, depth):
-        # All nodes are now 'module' type since we removed the project node
-        node = NodeItem(name, data if data else {}, self, node_type='module')
+        node = NodeItem(name, data if data else {}, self, node_type='module' if parent_node else 'project')
         
         # Set completion status from loaded data
         if data:
@@ -561,8 +575,10 @@ class SystemView(QWidget):
             parent_node.connected_lines.append(line)
 
         self.node_items[node] = {'name': name, 'data': data}
-        return node
 
+        # Update visual status after all children are loaded
+        # We'll do this in a separate pass
+        return node
 
     def load_module_data_from_file(self, module_data):
         """Load assigned_to and completed status from ModuleInfo.txt"""
@@ -937,35 +953,45 @@ class SystemView(QWidget):
         else:
             self.assigned_value.setStyleSheet("color: black;")
 
-        # Show completion checkbox for all nodes (since they're all modules now)
-        self.completion_checkbox.show()
-        self.completion_checkbox.blockSignals(True)
-        self.completion_checkbox.setChecked(node.completed)
-        self.completion_checkbox.blockSignals(False)
+        # Show completion checkbox for modules (not for project node)
+        if node.node_type == 'module':
+            self.completion_checkbox.show()
+            self.completion_checkbox.blockSignals(True)
+            self.completion_checkbox.setChecked(node.completed)
+            self.completion_checkbox.blockSignals(False)
 
-        # Check if module has docs
-        doc_file_path = self.check_module_documentation(data)
-        if doc_file_path:
-            self.construct_button.show()
+            # Check if module has docs
+            doc_file_path = self.check_module_documentation(data)
+            if doc_file_path:
+                self.construct_button.show()
+            else:
+                self.construct_button.hide()
+
+            # Check if risk assessment CSV exists
+            risk_file_path = self.check_risk_assessment_file(data)
+            if risk_file_path:
+                self.risk_button.show()
+            else:
+                self.risk_button.hide()
+
+            # Check for BOM file in lib folder
+            has_bom = self.check_for_bom_file(data)
+            if has_bom:
+                self.view_bom_button.setText("View Module BOM")
+                self.view_bom_button.clicked.disconnect()
+                self.view_bom_button.clicked.connect(self.view_module_bom)
+                self.view_bom_button.show()
+            else:
+                # Hide the BOM button if there's no BOM file
+                self.view_bom_button.hide()
+
         else:
+            # For project node
+            self.completion_checkbox.hide()
             self.construct_button.hide()
-
-        # Check if risk assessment
-        risk_file_path = self.check_risk_assessment_file(data)
-        if risk_file_path:
-            self.risk_button.show()
-        else:
             self.risk_button.hide()
 
-        # Check for BOM file in lib folder
-        has_bom = self.check_for_bom_file(data)
-        if has_bom:
-            self.view_bom_button.setText("View Module BOM")
-            self.view_bom_button.clicked.disconnect()
-            self.view_bom_button.clicked.connect(self.view_module_bom)
-            self.view_bom_button.show()
-        else:
-            # For nodes without BOM, show project info instead
+            # Update View BOM button for project node
             self.view_bom_button.setText("View Project Info")
             self.view_bom_button.clicked.disconnect()
             self.view_bom_button.clicked.connect(self.view_project_info)
@@ -1208,27 +1234,36 @@ class SystemView(QWidget):
         if not os.path.exists(module_dir):
             return None
         
-        # Recursively search for index.html files
-        def find_index_html(directory):
-            """Recursively search for index.html files"""
-            found_files = []
-            try:
-                for root, dirs, files in os.walk(directory):
-                    for file in files:
-                        if file.lower() == 'index.html':
-                            full_path = os.path.join(root, file)
-                            found_files.append(full_path)
-            except Exception as e:
-                pass
-            return found_files
+        # Check for documentation file
+        doc_path = os.path.join(module_dir, "src", "doc", "_site", "missing.html")
         
-        # Search for all index.html files
-        found_files = find_index_html(module_dir)
+        # Also check with src in different capitalizations
+        alt_paths = [
+            os.path.join(module_dir, "Src", "doc", "_site", "missing.html"),
+            os.path.join(module_dir, "SRC", "doc", "_site", "missing.html"),
+            # Check with Doc variations
+            os.path.join(module_dir, "src", "Doc", "_site", "missing.html"),
+            os.path.join(module_dir, "src", "DOC", "_site", "missing.html"),
+            # Check with _site variations
+            os.path.join(module_dir, "src", "doc", "_Site", "missing.html"),
+            os.path.join(module_dir, "src", "doc", "_SITE", "missing.html"),
+            # Check with missing.html variations
+            os.path.join(module_dir, "src", "doc", "_site", "Missing.html"),
+            os.path.join(module_dir, "src", "doc", "_site", "MISSING.html"),
+            # Common alternative capitalization combinations
+            os.path.join(module_dir, "Src", "Doc", "_Site", "Missing.html"),
+            os.path.join(module_dir, "SRC", "DOC", "_SITE", "MISSING.html"),
+        ]
         
-        # If we found files, return the first one
-        if found_files:
-            return found_files[0]
+        # Check main path first
+        if os.path.exists(doc_path):
+            return doc_path
         
+        # Then check alternative paths
+        for path in alt_paths:
+            if os.path.exists(path):
+                return path
+                
         return None
                 
     # Recenter the graphics view
@@ -1412,7 +1447,7 @@ class SystemView(QWidget):
 
 
     def check_risk_assessment_file(self, module_data):
-        """Check if a risk assessment file exists for the module"""
+        """Check if a risk assessment CSV file exists for the module"""
         if not module_data or not isinstance(module_data, dict):
             return None
             
@@ -1427,15 +1462,15 @@ class SystemView(QWidget):
         if not os.path.exists(module_dir):
             return None
         
-        # Check for risk assessment file with different capitalizations
+        # Check for risk assessment CSV file with different capitalizations
         possible_filenames = [
-            "RiskAssessment.txt", 
-            "riskassessment.txt", 
-            "RISKASSESSMENT.txt", 
-            "Risk_Assessment.txt", 
-            "risk_assessment.txt",
-            "risk-assessment.txt",
-            "Risk-Assessment.txt"
+            "RiskAssessment.csv", 
+            "riskassessment.csv", 
+            "RISKASSESSMENT.csv", 
+            "Risk_Assessment.csv", 
+            "risk_assessment.csv",
+            "risk-assessment.csv",
+            "Risk-Assessment.csv"
         ]
         
         for filename in possible_filenames:
@@ -1446,7 +1481,7 @@ class SystemView(QWidget):
         return None
 
     def open_risk_assessment(self):
-        """Open the risk assessment file for the selected module"""
+        """Open the risk assessment CSV file for the selected module in the CSV viewer"""
         if not self.selected_node or not isinstance(self.selected_node.data, dict):
             QMessageBox.warning(self, "Error", "No module selected or invalid module data.")
             return
@@ -1455,75 +1490,8 @@ class SystemView(QWidget):
         
         if not risk_file_path:
             QMessageBox.information(self, "Risk Assessment", 
-                                "No risk assessment file found for this module.")
+                                "No risk assessment CSV file found for this module.")
             return
         
-        try:
-            # Check for WSL environment
-            is_wsl = False
-            try:
-                with open('/proc/version', 'r') as f:
-                    if 'microsoft' in f.read().lower():
-                        is_wsl = True
-            except:
-                pass
-                
-            if is_wsl:
-                # For WSL, convert path to Windows format and use notepad
-                try:
-                    # Get Windows path using wslpath
-                    process = subprocess.run(['wslpath', '-w', risk_file_path], 
-                                        capture_output=True, text=True, check=True)
-                    windows_path = process.stdout.strip()
-                    
-                    # Use PowerShell with proper quoting for paths with spaces
-                    powershell_command = f'notepad.exe "{windows_path}"'
-                    subprocess.run(['powershell.exe', '-Command', powershell_command])
-                except Exception as e:
-                    print(f"PowerShell error: {str(e)}")
-                    # If conversion fails, try to open with a default Linux editor
-                    try:
-                        subprocess.run(['xdg-open', risk_file_path])
-                    except:
-                        # As a last resort, show the contents in a dialog
-                        self.show_risk_assessment_content(risk_file_path)
-            else:
-                # Standard OS handling
-                import platform
-                if platform.system() == "Windows":
-                    os.startfile(risk_file_path)
-                elif platform.system() == "Darwin":  # macOS
-                    subprocess.run(['open', risk_file_path])
-                else:  # Linux/Unix
-                    subprocess.run(['xdg-open', risk_file_path])
-                    
-        except Exception as e:
-            print(f"Error opening file: {str(e)}")
-            # If all else fails, read and show the file contents in a dialog
-            self.show_risk_assessment_content(risk_file_path)
-
-    def show_risk_assessment_content(self, file_path):
-        """Show file contents in a dialog when direct opening fails"""
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-                
-            dialog = QDialog(self)
-            dialog.setWindowTitle("Risk Assessment")
-            dialog.setMinimumSize(600, 400)
-            
-            layout = QVBoxLayout()
-            
-            text_edit = QTextEdit()
-            text_edit.setPlainText(content)
-            text_edit.setReadOnly(True)
-            layout.addWidget(text_edit)
-            
-            close_button = QPushButton("Close")
-            close_button.clicked.connect(dialog.accept)
-            layout.addWidget(close_button)
-            
-            dialog.setLayout(layout)
-            dialog.exec_()
-        except Exception as e:
-            QMessageBox.warning(self, "Error", f"Could not read risk assessment file: {str(e)}")
+        # Open the CSV file in the CSV viewer
+        self.open_csv_in_viewer(risk_file_path)
