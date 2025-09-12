@@ -1156,7 +1156,10 @@ class SystemView(QWidget):
             QMessageBox.warning(self, "Error", "No module selected.")
             return
         
-        # Find BOM files in current node and all children
+        # First check if current node has its own BOM
+        current_node_bom = self.check_for_bom_file(self.selected_node.data)
+        
+        # Find all BOM files in current node and children
         bom_files = self.find_csv_in_children(self.selected_node, self.check_for_bom_file)
         
         if not bom_files:
@@ -1164,12 +1167,32 @@ class SystemView(QWidget):
                                 "No BOM.csv file was found in this module or its sub-modules.")
             return
         
-        if len(bom_files) == 1:
-            # Only one BOM file found, open it directly
-            self.open_csv_in_viewer(bom_files[0]['path'])
+        # Check if current node has its own BOM
+        if current_node_bom:
+            # Current node has its own BOM
+            if len(bom_files) == 1:
+                # Only current node has BOM
+                self.open_csv_in_viewer(bom_files[0]['path'])
+            else:
+                # Current node + children have BOMs - show choice dialog
+                self.show_csv_aggregation_dialog(bom_files, "BOM")
         else:
-            # Multiple BOM files found, show aggregation dialog
-            self.show_csv_aggregation_dialog(bom_files, "BOM")
+            # Current node doesn't have its own BOM, but children do
+            reply = QMessageBox.question(
+                self, "BOM", 
+                f"This module does not have its own BOM file.\n\n"
+                f"However, {len(bom_files)} BOM file(s) were found in sub-modules.\n\n"
+                f"Would you like to view the aggregated BOM from sub-modules?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
+            )
+            
+            if reply == QMessageBox.Yes:
+                if len(bom_files) == 1:
+                    # Only one child has BOM - open it directly
+                    self.open_csv_in_viewer(bom_files[0]['path'])
+                else:
+                    # Multiple children have BOMs - create aggregated view directly
+                    self.create_and_open_aggregated_csv(bom_files, "BOM")
 
     def open_csv_in_viewer(self, csv_path):
         """Open a CSV file in the CSV viewer"""
