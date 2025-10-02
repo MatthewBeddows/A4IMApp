@@ -110,7 +110,7 @@ class MainMenuWidget(QWidget):
             repo_name = self.parent.initial_repo_url.split('/')[-1]
             module_dir = os.path.join(repo_dir, repo_name)
             
-            # Check for documentation using the new recursive logic
+            # Check for documentation using the same logic as SystemView
             return self.check_module_documentation_path(module_dir)
                 
         except Exception as e:
@@ -118,29 +118,41 @@ class MainMenuWidget(QWidget):
             return False
 
     def check_module_documentation_path(self, module_dir):
-        """Check if a module has documentation file using recursive search"""
+        """Check if a module has documentation file (same logic as SystemView)"""
         if not os.path.exists(module_dir):
             return False
         
-        # Recursively search for index.html files
-        def find_index_html(directory):
-            """Recursively search for index.html files"""
-            found_files = []
-            try:
-                for root, dirs, files in os.walk(directory):
-                    for file in files:
-                        if file.lower() == 'index.html':
-                            full_path = os.path.join(root, file)
-                            found_files.append(full_path)
-            except Exception as e:
-                pass
-            return found_files
+        # Check for documentation file
+        doc_path = os.path.join(module_dir, "src", "doc", "_site", "missing.html")
         
-        # Search for all index.html files
-        found_files = find_index_html(module_dir)
+        # Also check with src in different capitalizations
+        alt_paths = [
+            os.path.join(module_dir, "Src", "doc", "_site", "missing.html"),
+            os.path.join(module_dir, "SRC", "doc", "_site", "missing.html"),
+            # Check with Doc variations
+            os.path.join(module_dir, "src", "Doc", "_site", "missing.html"),
+            os.path.join(module_dir, "src", "DOC", "_site", "missing.html"),
+            # Check with _site variations
+            os.path.join(module_dir, "src", "doc", "_Site", "missing.html"),
+            os.path.join(module_dir, "src", "doc", "_SITE", "missing.html"),
+            # Check with missing.html variations
+            os.path.join(module_dir, "src", "doc", "_site", "Missing.html"),
+            os.path.join(module_dir, "src", "doc", "_site", "MISSING.html"),
+            # Common alternative capitalization combinations
+            os.path.join(module_dir, "Src", "Doc", "_Site", "Missing.html"),
+            os.path.join(module_dir, "SRC", "DOC", "_SITE", "MISSING.html"),
+        ]
         
-        # Return True if any index.html files are found
-        return len(found_files) > 0
+        # Check main path first
+        if os.path.exists(doc_path):
+            return True
+        
+        # Then check alternative paths
+        for path in alt_paths:
+            if os.path.exists(path):
+                return True
+                
+        return False
 
     def get_architect_documentation_path(self):
         """Get the documentation path for the architect module"""
@@ -162,7 +174,7 @@ class MainMenuWidget(QWidget):
             repo_name = self.parent.initial_repo_url.split('/')[-1]
             module_dir = os.path.join(repo_dir, repo_name)
             
-            # Get the documentation path using recursive search
+            # Get the documentation path
             return self.get_module_documentation_path(module_dir)
                 
         except Exception as e:
@@ -170,31 +182,40 @@ class MainMenuWidget(QWidget):
             return None
 
     def get_module_documentation_path(self, module_dir):
-        """Get the documentation file path using recursive search"""
+        """Get the documentation file path (same logic as SystemView)"""
         if not os.path.exists(module_dir):
             return None
         
-        # Recursively search for index.html files
-        def find_index_html(directory):
-            """Recursively search for index.html files"""
-            found_files = []
-            try:
-                for root, dirs, files in os.walk(directory):
-                    for file in files:
-                        if file.lower() == 'index.html':
-                            full_path = os.path.join(root, file)
-                            found_files.append(full_path)
-            except Exception as e:
-                pass
-            return found_files
+        # Check for documentation file
+        doc_path = os.path.join(module_dir, "src", "doc", "_site", "missing.html")
         
-        # Search for all index.html files
-        found_files = find_index_html(module_dir)
+        # Also check with src in different capitalizations
+        alt_paths = [
+            os.path.join(module_dir, "Src", "doc", "_site", "missing.html"),
+            os.path.join(module_dir, "SRC", "doc", "_site", "missing.html"),
+            # Check with Doc variations
+            os.path.join(module_dir, "src", "Doc", "_site", "missing.html"),
+            os.path.join(module_dir, "src", "DOC", "_site", "missing.html"),
+            # Check with _site variations
+            os.path.join(module_dir, "src", "doc", "_Site", "missing.html"),
+            os.path.join(module_dir, "src", "doc", "_SITE", "missing.html"),
+            # Check with missing.html variations
+            os.path.join(module_dir, "src", "doc", "_site", "Missing.html"),
+            os.path.join(module_dir, "src", "doc", "_site", "MISSING.html"),
+            # Common alternative capitalization combinations
+            os.path.join(module_dir, "Src", "Doc", "_Site", "Missing.html"),
+            os.path.join(module_dir, "SRC", "DOC", "_SITE", "MISSING.html"),
+        ]
         
-        # If we found files, return the first one
-        if found_files:
-            return found_files[0]
+        # Check main path first
+        if os.path.exists(doc_path):
+            return doc_path
         
+        # Then check alternative paths
+        for path in alt_paths:
+            if os.path.exists(path):
+                return path
+                
         return None
 
     def find_module_info_file(self, module_dir):
@@ -340,6 +361,8 @@ class MainMenuWidget(QWidget):
         except Exception as e:
             print(f"Error extracting first documentation link: {e}")
             return None
+
+
 
     def open_documentation_in_browser(self, doc_path):
         """Open the HTML file in the default browser"""

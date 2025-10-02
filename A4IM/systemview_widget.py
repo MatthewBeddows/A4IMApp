@@ -9,7 +9,7 @@ from PyQt5.QtCore import QUrl
 import math
 import os
 import tempfile
-import re  # For regex operations to strip text in square brackets
+import re 
 import pygit2
 import subprocess
 from collections import OrderedDict
@@ -80,7 +80,7 @@ class NodeItem(QGraphicsRectItem):
         self.name = name
         self.data = data
         self.system_view = system_view
-        self.node_type = node_type  # 'project' or 'module'
+        self.node_type = node_type  # 'module'
         self.completed = False  # Completion status
         self.completion_status = 'not_started'  # 'not_started', 'in_progress', 'completed'
         self.parent_node = None  # Parent node
@@ -131,7 +131,7 @@ class NodeItem(QGraphicsRectItem):
         self.scene().clearSelection()
         self.setSelected(True)
         self.system_view.node_clicked(self)
-        # Prevent default behavior
+        
 
     # Update the status indicator color based on completion status
     def update_status_indicator(self):
