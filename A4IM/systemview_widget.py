@@ -108,7 +108,7 @@ class NodeItem(QGraphicsRectItem):
         # Strip text in square brackets from name
         display_name = re.sub(r'\[.*?\]', '', name).strip()
         text.setPlainText(display_name)
-        text.setTextWidth(width - 10)
+        text.setTextWidth(width - 30)  # Leave more space for indicators
 
         # Center the text within the node
         text_rect = text.boundingRect()
@@ -125,6 +125,25 @@ class NodeItem(QGraphicsRectItem):
             self.status_indicator.setBrush(QBrush(QColor("#D9534F")))  # Red color for incomplete
             self.status_indicator.setPen(QPen(Qt.black))
             self.status_indicator.setPos(indicator_x, indicator_y)
+        
+        # Track download state
+        self.is_downloaded = data.get('is_downloaded', False)
+        
+        # Add download indicator at BOTTOM LEFT corner
+        if node_type != 'project':
+            self.download_indicator = QGraphicsTextItem(self)
+            self.download_indicator.setDefaultTextColor(QColor("#FFD700"))  # Gold color
+            download_font = QFont('Arial', 14, QFont.Bold)
+            self.download_indicator.setFont(download_font)
+            self.download_indicator.setPlainText("☁")  # Cloud icon
+            
+            # Position at bottom right
+            indicator_width = self.download_indicator.boundingRect().width()
+            indicator_height = self.download_indicator.boundingRect().height()
+            self.download_indicator.setPos(
+                width/2 - indicator_width - 3,  # Right edge with small padding
+                height/2 - indicator_height - 3  # Bottom edge with small padding
+            )
 
     # Handle mouse press event
     def mousePressEvent(self, event):
@@ -447,9 +466,18 @@ class SystemView(QWidget):
         self.materials_button.hide()
         right_layout.addWidget(self.materials_button)
 
+        # Replace both download buttons with a single one
+        self.download_module_button = self.create_button("Download Module")
+        self.download_module_button.clicked.connect(self.show_download_dialog)
+        self.download_module_button.hide()
+        right_layout.addWidget(self.download_module_button)
+
+
         back_button = self.create_button("Back")
         back_button.clicked.connect(self.parent.show_main_menu)
         right_layout.addWidget(back_button)
+
+
 
         # Add left and right layouts to main layout
         layout.addLayout(left_layout, 2)
@@ -575,6 +603,44 @@ class SystemView(QWidget):
         else:
             node.completion_status = 'not_started'
         
+        # Check if repository is actually downloaded on disk
+        if data and 'repository' in data:
+            repo_info = data.get('repository', {})
+            if repo_info and repo_info.get('name'):
+                repo_dir = os.path.join("Downloaded Repositories", self.parent.repo_folder)
+                repo_path = os.path.join(repo_dir, repo_info.get('name'))
+                
+                # Check if directory exists and has content (not just metadata)
+                if os.path.exists(repo_path) and os.path.isdir(repo_path):
+                    # Check if it has actual repo content (not just in .metadata folder)
+                    has_content = False
+                    try:
+                        # Look for common repo files/folders besides just ModuleInfo.txt
+                        contents = os.listdir(repo_path)
+                        # Filter out just metadata files
+                        real_contents = [f for f in contents if f.lower() not in ['moduleinfo.txt', 'moduleinfor.txt']]
+                        if real_contents:
+                            has_content = True
+                    except:
+                        pass
+                    
+                    if has_content:
+                        node.is_downloaded = True
+                        if hasattr(node, 'download_indicator'):
+                            node.download_indicator.setPlainText("✓")
+                            node.download_indicator.setDefaultTextColor(QColor("#32CD32"))  # Green
+                        print(f"Node {name}: Repository found on disk - marked as downloaded")
+                    else:
+                        node.is_downloaded = False
+                        print(f"Node {name}: Repository folder exists but is empty")
+                else:
+                    node.is_downloaded = False
+                    print(f"Node {name}: Repository not found on disk")
+            else:
+                node.is_downloaded = False
+        else:
+            node.is_downloaded = False
+        
         node.setPos(position)
         node.setZValue(1)
         self.graphics_scene.addItem(node)
@@ -593,8 +659,6 @@ class SystemView(QWidget):
 
         self.node_items[node] = {'name': name, 'data': data}
 
-        # Update visual status after all children are loaded
-        # We'll do this in a separate pass
         return node
 
     def load_module_data_from_file(self, module_data):
@@ -1054,9 +1118,11 @@ class SystemView(QWidget):
             else:
                 self.materials_button.hide()
 
-                # If in toggle mode and a module node is clicked, update the display
-                if self.toggle_mode:
-                    self.update_toggle_view(node)
+        # Show download buttons if not downloaded (MOVED OUTSIDE THE ELSE BLOCK)
+        if node.node_type == 'module' and not node.is_downloaded:
+            self.download_module_button.show()
+        else:
+            self.download_module_button.hide()
 
     def get_button_style(self):
         return """
@@ -1265,6 +1331,12 @@ class SystemView(QWidget):
 
     def construct_module(self):
         """Open the module documentation in the web browser"""
+
+        if not self.selected_node.is_downloaded:
+            QMessageBox.warning(self, "Not Downloaded", 
+                            "Please download this module first to view documentation.")
+            return
+
         if not self.selected_node:
             QMessageBox.warning(self, "Error", "No module selected.")
             return
@@ -1876,3 +1948,148 @@ class SystemView(QWidget):
             self.open_csv_in_viewer(materials_files[0]['path'])
         else:
             self.show_csv_aggregation_dialog(materials_files, "Materials")
+
+    def download_selected_module(self):
+        """Download only the selected module"""
+        if not self.selected_node:
+            return
+        
+        reply = QMessageBox.question(
+            self, "Download Module",
+            f"Download full repository for '{self.selected_node.name}'?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            self.download_single_module(self.selected_node)
+
+    def download_module_with_children(self):
+        """Download selected module and all its children"""
+        if not self.selected_node:
+            return
+        
+        # Count total modules
+        def count_modules(node):
+            count = 1
+            for child in node.child_nodes:
+                count += count_modules(child)
+            return count
+        
+        total = count_modules(self.selected_node)
+        
+        reply = QMessageBox.question(
+            self, "Download Modules",
+            f"Download {total} module(s) (this module and all children)?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            self.download_node_tree(self.selected_node)
+
+    def download_single_module(self, node):
+        """Actually clone the repository for a single module"""
+        repo_info = node.data.get('repository', {})
+        if not repo_info or not repo_info.get('address'):
+            return
+        
+        repo_url = repo_info['address']
+        repo_name = repo_url.split('/')[-1].replace('.git', '')
+        repo_dir = os.path.join("Downloaded Repositories", self.parent.repo_folder)
+        local_path = os.path.join(repo_dir, repo_name)
+        
+        try:
+            import pygit2
+            print(f"Cloning {repo_name} from {repo_url}...")
+            pygit2.clone_repository(repo_url, local_path)
+            
+            # Update node state
+            node.is_downloaded = True
+            node.download_indicator.setPlainText("✓")  # Checkmark
+            node.download_indicator.setDefaultTextColor(QColor("#32CD32"))  # Green checkmark
+            
+            # Hide download buttons
+            self.download_module_button.hide()
+            
+            QMessageBox.information(self, "Success", f"Downloaded {repo_name}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to download: {str(e)}")
+
+    def show_download_dialog(self):
+        """Show dialog to choose download scope"""
+        if not self.selected_node:
+            return
+        
+        # Count children
+        def count_modules(node):
+            count = 1
+            for child in node.child_nodes:
+                count += count_modules(child)
+            return count
+        
+        total_with_children = count_modules(self.selected_node)
+        
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Download Module")
+        dialog.setMinimumWidth(400)
+        
+        layout = QVBoxLayout()
+        
+        # Title
+        title = QLabel(f"Download: {self.selected_node.name}")
+        title.setFont(QFont('Arial', 14, QFont.Bold))
+        layout.addWidget(title)
+        
+        # Spacing
+        layout.addSpacing(10)
+        
+        # Radio buttons
+        radio_group = QButtonGroup(dialog)
+        
+        # Option 1: Module + children (default)
+        with_children_radio = QRadioButton(
+            f"Download this module and its required children ({total_with_children} modules)"
+        )
+        with_children_radio.setChecked(True)  # Default option
+        radio_group.addButton(with_children_radio, 1)
+        layout.addWidget(with_children_radio)
+        
+        layout.addSpacing(10)
+        
+        # Option 2: This module only
+        single_radio = QRadioButton("Download only this module (1 module)")
+        radio_group.addButton(single_radio, 0)
+        layout.addWidget(single_radio)
+        
+        layout.addSpacing(20)
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        
+        download_button = QPushButton("Download")
+        download_button.setStyleSheet(self.get_button_style())
+        download_button.clicked.connect(dialog.accept)
+        
+        cancel_button = QPushButton("Cancel")
+        cancel_button.setStyleSheet(self.get_button_style())
+        cancel_button.clicked.connect(dialog.reject)
+        
+        button_layout.addWidget(download_button)
+        button_layout.addWidget(cancel_button)
+        layout.addLayout(button_layout)
+        
+        dialog.setLayout(layout)
+        
+        if dialog.exec_() == QDialog.Accepted:
+            choice = radio_group.checkedId()
+            if choice == 1:
+                # Download with children
+                self.download_node_tree(self.selected_node)
+            else:
+                # Download single module
+                self.download_single_module(self.selected_node)
+
+    def download_node_tree(self, node):
+        """Recursively download node and all children"""
+        self.download_single_module(node)
+        for child in node.child_nodes:
+            self.download_node_tree(child)
