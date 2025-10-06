@@ -5,7 +5,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt, QPointF, QRectF, QLineF
 from PyQt5.QtGui import QFont, QColor, QPen, QBrush, QPainter, QPixmap
-from PyQt5.QtCore import QUrl
+from PyQt5.QtCore import QUrl, QThread, pyqtSignal
 import math
 import os
 import tempfile
@@ -1997,22 +1997,35 @@ class SystemView(QWidget):
         repo_dir = os.path.join("Downloaded Repositories", self.parent.repo_folder)
         local_path = os.path.join(repo_dir, repo_name)
         
-        try:
-            import pygit2
-            print(f"Cloning {repo_name} from {repo_url}...")
-            pygit2.clone_repository(repo_url, local_path)
-            
+        # Create and start download worker
+        self.download_worker = DownloadWorker(repo_url, local_path)
+        self.download_worker.progress.connect(lambda msg: print(msg))
+        self.download_worker.finished.connect(lambda success, msg: self.on_download_finished(node, repo_name, success, msg))
+        
+        # Disable button during download
+        self.download_module_button.setEnabled(False)
+        self.download_module_button.setText("Downloading...")
+        
+        self.download_worker.start()
+
+    def on_download_finished(self, node, repo_name, success, message):
+        """Handle download completion"""
+        # Re-enable button
+        self.download_module_button.setEnabled(True)
+        self.download_module_button.setText("Download Module")
+        
+        if success:
             # Update node state
             node.is_downloaded = True
-            node.download_indicator.setPlainText("✓")  # Checkmark
-            node.download_indicator.setDefaultTextColor(QColor("#32CD32"))  # Green checkmark
+            node.download_indicator.setPlainText("✓")
+            node.download_indicator.setDefaultTextColor(QColor("#32CD32"))
             
-            # Hide download buttons
+            # Hide download button
             self.download_module_button.hide()
             
             QMessageBox.information(self, "Success", f"Downloaded {repo_name}")
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to download: {str(e)}")
+        else:
+            QMessageBox.critical(self, "Error", f"Failed to download: {message}")
 
     def show_download_dialog(self):
         """Show dialog to choose download scope"""
@@ -2090,6 +2103,92 @@ class SystemView(QWidget):
 
     def download_node_tree(self, node):
         """Recursively download node and all children"""
-        self.download_single_module(node)
-        for child in node.child_nodes:
-            self.download_node_tree(child)
+        # Create list of all nodes to download
+        nodes_to_download = []
+        
+        def collect_nodes(n):
+            nodes_to_download.append(n)
+            for child in n.child_nodes:
+                collect_nodes(child)
+        
+        collect_nodes(node)
+        
+        # Start downloading
+        self.download_queue = nodes_to_download
+        self.current_download_index = 0
+        self.download_next_in_queue()
+
+    def download_next_in_queue(self):
+        """Download the next module in the queue"""
+        if self.current_download_index >= len(self.download_queue):
+            # All downloads complete
+            QMessageBox.information(self, "Complete", "All modules downloaded successfully!")
+            return
+        
+        current_node = self.download_queue[self.current_download_index]
+        
+        # Skip if already downloaded
+        if current_node.is_downloaded:
+            self.current_download_index += 1
+            self.download_next_in_queue()
+            return
+        
+        repo_info = current_node.data.get('repository', {})
+        if not repo_info or not repo_info.get('address'):
+            self.current_download_index += 1
+            self.download_next_in_queue()
+            return
+        
+        repo_url = repo_info['address']
+        repo_name = repo_url.split('/')[-1].replace('.git', '')
+        repo_dir = os.path.join("Downloaded Repositories", self.parent.repo_folder)
+        local_path = os.path.join(repo_dir, repo_name)
+        
+        # Create and start download worker
+        self.download_worker = DownloadWorker(repo_url, local_path)
+        self.download_worker.progress.connect(lambda msg: print(msg))
+        self.download_worker.finished.connect(
+            lambda success, msg: self.on_queue_download_finished(current_node, repo_name, success, msg)
+        )
+        
+        # Update button to show progress
+        self.download_module_button.setEnabled(False)
+        self.download_module_button.setText(f"Downloading {self.current_download_index + 1}/{len(self.download_queue)}...")
+        
+        self.download_worker.start()
+
+    def on_queue_download_finished(self, node, repo_name, success, message):
+        """Handle completion of a queued download"""
+        if success:
+            # Update node state
+            node.is_downloaded = True
+            node.download_indicator.setPlainText("✓")
+            node.download_indicator.setDefaultTextColor(QColor("#32CD32"))
+            print(f"Downloaded {repo_name}")
+        else:
+            print(f"Failed to download {repo_name}: {message}")
+        
+        # Move to next download
+        self.current_download_index += 1
+        self.download_next_in_queue()
+
+
+
+class DownloadWorker(QThread):
+    """Background thread for downloading repositories"""
+    progress = pyqtSignal(str)  # Emits status messages
+    finished = pyqtSignal(bool, str)  # Emits (success, message)
+    
+    def __init__(self, repo_url, local_path):
+        super().__init__()
+        self.repo_url = repo_url
+        self.local_path = local_path
+    
+    def run(self):
+        try:
+            import pygit2
+            self.progress.emit(f"Cloning repository...")
+            pygit2.clone_repository(self.repo_url, self.local_path)
+            self.finished.emit(True, "Download complete")
+        except Exception as e:
+            self.finished.emit(False, str(e))
