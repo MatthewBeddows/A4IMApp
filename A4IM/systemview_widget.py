@@ -80,7 +80,7 @@ class NodeItem(QGraphicsRectItem):
         self.name = name
         self.data = data
         self.system_view = system_view
-        self.node_type = node_type  # 'module'
+        self.node_type = node_type  # 'module' or 'project'
         self.completed = False  # Completion status
         self.completion_status = 'not_started'  # 'not_started', 'in_progress', 'completed'
         self.parent_node = None  # Parent node
@@ -116,35 +116,32 @@ class NodeItem(QGraphicsRectItem):
         text_y = -text_rect.height() / 2
         text.setPos(text_x, text_y)
 
-        # Create status indicator at top right corner (not for project node)
-        if node_type != 'project':
-            indicator_size = 15
-            indicator_x = width / 2 - indicator_size - 2
-            indicator_y = -height / 2 + 2
-            self.status_indicator = QGraphicsRectItem(0, 0, indicator_size, indicator_size, self)
-            self.status_indicator.setBrush(QBrush(QColor("#D9534F")))  # Red color for incomplete
-            self.status_indicator.setPen(QPen(Qt.black))
-            self.status_indicator.setPos(indicator_x, indicator_y)
+        # Create status indicator at top right corner (FOR ALL NODES)
+        indicator_size = 15
+        indicator_x = width / 2 - indicator_size - 2
+        indicator_y = -height / 2 + 2
+        self.status_indicator = QGraphicsRectItem(0, 0, indicator_size, indicator_size, self)
+        self.status_indicator.setBrush(QBrush(QColor("#D9534F")))  # Red color for incomplete
+        self.status_indicator.setPen(QPen(Qt.black))
+        self.status_indicator.setPos(indicator_x, indicator_y)
         
         # Track download state
         self.is_downloaded = data.get('is_downloaded', False)
         
-        # Add download indicator at BOTTOM LEFT corner
-        if node_type != 'project':
-            self.download_indicator = QGraphicsTextItem(self)
-            self.download_indicator.setDefaultTextColor(QColor("#FFD700"))  # Gold color
-            download_font = QFont('Arial', 14, QFont.Bold)
-            self.download_indicator.setFont(download_font)
-            self.download_indicator.setPlainText("☁")  # Cloud icon
-            
-            # Position at bottom right
-            indicator_width = self.download_indicator.boundingRect().width()
-            indicator_height = self.download_indicator.boundingRect().height()
-            self.download_indicator.setPos(
-                width/2 - indicator_width - 3,  # Right edge with small padding
-                height/2 - indicator_height - 3  # Bottom edge with small padding
-            )
-
+        # Add download indicator at BOTTOM RIGHT corner (FOR ALL NODES)
+        self.download_indicator = QGraphicsTextItem(self)
+        self.download_indicator.setDefaultTextColor(QColor("#FFD700"))  # Gold color
+        download_font = QFont('Arial', 14, QFont.Bold)
+        self.download_indicator.setFont(download_font)
+        self.download_indicator.setPlainText("☁")  # Cloud icon
+        
+        # Position at bottom right
+        indicator_width = self.download_indicator.boundingRect().width()
+        indicator_height = self.download_indicator.boundingRect().height()
+        self.download_indicator.setPos(
+            width/2 - indicator_width - 3,  # Right edge with small padding
+            height/2 - indicator_height - 3  # Bottom edge with small padding
+        )
     # Handle mouse press event
     def mousePressEvent(self, event):
         self.scene().clearSelection()
@@ -1001,7 +998,7 @@ class SystemView(QWidget):
         return False
 
 
-    # Called when a node is clicked
+        # Called when a node is clicked
     def node_clicked(self, node):
         self.selected_node = node
         name = node.name
@@ -1034,96 +1031,55 @@ class SystemView(QWidget):
         else:
             self.assigned_value.setStyleSheet("color: black;")
 
-        # Show completion checkbox for modules (not for project node)
-        if node.node_type == 'module':
-            self.completion_checkbox.show()
-            self.completion_checkbox.blockSignals(True)
-            self.completion_checkbox.setChecked(node.completed)
-            self.completion_checkbox.blockSignals(False)
+        # Show completion checkbox for ALL nodes
+        self.completion_checkbox.show()
+        self.completion_checkbox.blockSignals(True)
+        self.completion_checkbox.setChecked(node.completed)
+        self.completion_checkbox.blockSignals(False)
 
-            # Check if module has docs
-            doc_file_path = self.check_module_documentation(data)
-            if doc_file_path:
-                self.construct_button.show()
-            else:
-                self.construct_button.hide()
-
-            # Check if risk assessment exists (current + children)
-            if self.has_csv_in_children(node, self.check_risk_assessment_file):
-                self.risk_button.show()
-            else:
-                self.risk_button.hide()
-
-            # Check for BOM files (current + children)
-            if self.has_csv_in_children(node, self.check_for_bom_file):
-                self.view_bom_button.show()
-            else:
-                self.view_bom_button.hide()
-
-            # Check for inventory files (current + children)
-            if self.has_csv_in_children(node, self.check_for_inventory_csv):
-                self.inventory_button.show()
-            else:
-                self.inventory_button.hide()
-
-            # Check for parts files (current + children)
-            if self.has_csv_in_children(node, self.check_for_parts_csv):
-                self.parts_button.show()
-            else:
-                self.parts_button.hide()
-
-            # Check for materials files (current + children)
-            if self.has_csv_in_children(node, self.check_for_materials_csv):
-                self.materials_button.show()
-            else:
-                self.materials_button.hide()
-
+        # Check if module has docs
+        doc_file_path = self.check_module_documentation(data)
+        if doc_file_path:
+            self.construct_button.show()
         else:
-            # For project node
-            self.completion_checkbox.hide()
             self.construct_button.hide()
+
+        # Check if risk assessment exists (current + children)
+        if self.has_csv_in_children(node, self.check_risk_assessment_file):
+            self.risk_button.show()
+        else:
+            self.risk_button.hide()
+
+        # Check for BOM files (current + children)
+        if self.has_csv_in_children(node, self.check_for_bom_file):
+            self.view_bom_button.show()
+        else:
+            self.view_bom_button.hide()
+
+        # Check for inventory files (current + children)
+        if self.has_csv_in_children(node, self.check_for_inventory_csv):
+            self.inventory_button.show()
+        else:
+            self.inventory_button.hide()
+
+        # Check for parts files (current + children)
+        if self.has_csv_in_children(node, self.check_for_parts_csv):
+            self.parts_button.show()
+        else:
+            self.parts_button.hide()
+
+        # Check for materials files (current + children)
+        if self.has_csv_in_children(node, self.check_for_materials_csv):
+            self.materials_button.show()
+        else:
+            self.materials_button.hide()
+
+        # Show download button if not downloaded (works for ALL nodes)
+        if not node.is_downloaded:
+            self.download_module_button.show()
+        else:
+            self.download_module_button.hide()
             
-            # Check if risk assessment exists in children for project node
-            if self.has_csv_in_children(node, self.check_risk_assessment_file):
-                self.risk_button.show()
-            else:
-                self.risk_button.hide()
-
-            # Check for BOM files in children for project node
-            if self.has_csv_in_children(node, self.check_for_bom_file):
-                self.view_bom_button.setText("View Module BOM")
-                self.view_bom_button.clicked.disconnect()
-                self.view_bom_button.clicked.connect(self.view_module_bom)
-                self.view_bom_button.show()
-            else:
-                # Update View BOM button for project node when no BOM files
-                self.view_bom_button.setText("View Project Info")
-                self.view_bom_button.clicked.disconnect()
-                self.view_bom_button.clicked.connect(self.view_project_info)
-                self.view_bom_button.show()
-
-            # Check for CSV files in children for project node
-            if self.has_csv_in_children(node, self.check_for_inventory_csv):
-                self.inventory_button.show()
-            else:
-                self.inventory_button.hide()
-
-            if self.has_csv_in_children(node, self.check_for_parts_csv):
-                self.parts_button.show()
-            else:
-                self.parts_button.hide()
-
-            if self.has_csv_in_children(node, self.check_for_materials_csv):
-                self.materials_button.show()
-            else:
-                self.materials_button.hide()
-
-            # Show download button if not downloaded (works for ALL nodes including root)
-            if not node.is_downloaded:
-                self.download_module_button.show()
-            else:
-                self.download_module_button.hide()
-
     def get_button_style(self):
         return """
             QPushButton {
