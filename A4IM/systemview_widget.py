@@ -1118,11 +1118,11 @@ class SystemView(QWidget):
             else:
                 self.materials_button.hide()
 
-        # Show download buttons if not downloaded (MOVED OUTSIDE THE ELSE BLOCK)
-        if node.node_type == 'module' and not node.is_downloaded:
-            self.download_module_button.show()
-        else:
-            self.download_module_button.hide()
+            # Show download button if not downloaded (works for ALL nodes including root)
+            if not node.is_downloaded:
+                self.download_module_button.show()
+            else:
+                self.download_module_button.hide()
 
     def get_button_style(self):
         return """
@@ -2041,6 +2041,12 @@ class SystemView(QWidget):
         
         total_with_children = count_modules(self.selected_node)
         
+        # If no children, just download directly without dialog
+        if total_with_children == 1:
+            self.download_single_module(self.selected_node)
+            return
+        
+        # Otherwise show dialog
         dialog = QDialog(self)
         dialog.setWindowTitle("Download Module")
         dialog.setMinimumWidth(400)
