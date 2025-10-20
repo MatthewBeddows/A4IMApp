@@ -1,6 +1,10 @@
 import sys
 import os
 import requests
+
+# Set high DPI scaling policy
+os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
+
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QStackedWidget, QProgressBar, QMessageBox)
 from PyQt5.QtCore import Qt, QCoreApplication
 from collections import OrderedDict
@@ -537,6 +541,11 @@ class GitFileReaderApp(QMainWindow):
             print(f"Progress: {value}%")
 
 def main():
+
+    # Enable High DPI scaling BEFORE creating QApplication
+    QCoreApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+    QCoreApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+
     app = QApplication(sys.argv + ['--disable-seccomp-filter-sandbox'])
 
     # Configure QtWebEngine for software rendering
