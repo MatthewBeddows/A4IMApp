@@ -13,6 +13,7 @@ import re
 import pygit2
 import subprocess
 from collections import OrderedDict
+from download_manager import DownloadManager , DownloadWorker
 
 #class for creating modules
 class AddModuleDialog(QDialog):
@@ -258,6 +259,7 @@ class SystemView(QWidget):
         self.toggle_mode = False  # Toggle mode flag
         self.modules_data = {}  # Store modules data
         self.project_name = None  # Store the project name dynamically
+        self.download_manager = DownloadManager(self)
         self.setup_ui()
 
 
@@ -1905,64 +1907,23 @@ class SystemView(QWidget):
         else:
             self.show_csv_aggregation_dialog(materials_files, "Materials")
 
-    def download_selected_module(self):
-        """Download only the selected module"""
-        if not self.selected_node:
-            return
-        
-        reply = QMessageBox.question(
-            self, "Download Module",
-            f"Download full repository for '{self.selected_node.name}'?",
-            QMessageBox.Yes | QMessageBox.No
-        )
-        
-        if reply == QMessageBox.Yes:
-            self.download_single_module(self.selected_node)
-
-    def download_module_with_children(self):
-        """Download selected module and all its children"""
-        if not self.selected_node:
-            return
-        
-        # Count total modules
-        def count_modules(node):
-            count = 1
-            for child in node.child_nodes:
-                count += count_modules(child)
-            return count
-        
-        total = count_modules(self.selected_node)
-        
-        reply = QMessageBox.question(
-            self, "Download Modules",
-            f"Download {total} module(s) (this module and all children)?",
-            QMessageBox.Yes | QMessageBox.No
-        )
-        
-        if reply == QMessageBox.Yes:
-            self.download_node_tree(self.selected_node)
 
     def download_single_module(self, node):
-        """Actually clone the repository for a single module"""
-        repo_info = node.data.get('repository', {})
-        if not repo_info or not repo_info.get('address'):
-            return
+        """Download a single module - delegates to download manager"""
+        self.download_manager.download_single_module(node)
+    
+    def download_node_tree(self, node):
+        """Download module tree - delegates to download manager"""
+        self.download_manager.download_node_tree(node)
+    
+    def closeEvent(self, event):
+        """Handle widget close event - cleanup download threads"""
+        self.download_manager.shutdown()
         
-        repo_url = repo_info['address']
-        repo_name = repo_url.split('/')[-1].replace('.git', '')
-        repo_dir = os.path.join("Downloaded Repositories", self.parent.repo_folder)
-        local_path = os.path.join(repo_dir, repo_name)
+        # Also cleanup temp CSV files
+        self.cleanup_temp_files()
         
-        # Create and start download worker
-        self.download_worker = DownloadWorker(repo_url, local_path)
-        self.download_worker.progress.connect(lambda msg: print(msg))
-        self.download_worker.finished.connect(lambda success, msg: self.on_download_finished(node, repo_name, success, msg))
-        
-        # Disable button during download
-        self.download_module_button.setEnabled(False)
-        self.download_module_button.setText("Downloading...")
-        
-        self.download_worker.start()
+        event.accept()
 
     def on_download_finished(self, node, repo_name, success, message):
         """Handle download completion"""
@@ -2063,94 +2024,8 @@ class SystemView(QWidget):
                 # Download single module
                 self.download_single_module(self.selected_node)
 
-    def download_node_tree(self, node):
-        """Recursively download node and all children"""
-        # Create list of all nodes to download
-        nodes_to_download = []
-        
-        def collect_nodes(n):
-            nodes_to_download.append(n)
-            for child in n.child_nodes:
-                collect_nodes(child)
-        
-        collect_nodes(node)
-        
-        # Start downloading
-        self.download_queue = nodes_to_download
-        self.current_download_index = 0
-        self.download_next_in_queue()
-
-    def download_next_in_queue(self):
-        """Download the next module in the queue"""
-        if self.current_download_index >= len(self.download_queue):
-            # All downloads complete
-            QMessageBox.information(self, "Complete", "All modules downloaded successfully!")
-            return
-        
-        current_node = self.download_queue[self.current_download_index]
-        
-        # Skip if already downloaded
-        if current_node.is_downloaded:
-            self.current_download_index += 1
-            self.download_next_in_queue()
-            return
-        
-        repo_info = current_node.data.get('repository', {})
-        if not repo_info or not repo_info.get('address'):
-            self.current_download_index += 1
-            self.download_next_in_queue()
-            return
-        
-        repo_url = repo_info['address']
-        repo_name = repo_url.split('/')[-1].replace('.git', '')
-        repo_dir = os.path.join("Downloaded Repositories", self.parent.repo_folder)
-        local_path = os.path.join(repo_dir, repo_name)
-        
-        # Create and start download worker
-        self.download_worker = DownloadWorker(repo_url, local_path)
-        self.download_worker.progress.connect(lambda msg: print(msg))
-        self.download_worker.finished.connect(
-            lambda success, msg: self.on_queue_download_finished(current_node, repo_name, success, msg)
-        )
-        
-        # Update button to show progress
-        self.download_module_button.setEnabled(False)
-        self.download_module_button.setText(f"Downloading {self.current_download_index + 1}/{len(self.download_queue)}...")
-        
-        self.download_worker.start()
-
-    def on_queue_download_finished(self, node, repo_name, success, message):
-        """Handle completion of a queued download"""
-        if success:
-            # Update node state
-            node.is_downloaded = True
-            node.download_indicator.setPlainText("✓")
-            node.download_indicator.setDefaultTextColor(QColor("#32CD32"))
-            print(f"Downloaded {repo_name}")
-        else:
-            print(f"Failed to download {repo_name}: {message}")
-        
-        # Move to next download
-        self.current_download_index += 1
-        self.download_next_in_queue()
 
 
 
-class DownloadWorker(QThread):
-    """Background thread for downloading repositories"""
-    progress = pyqtSignal(str)  # Emits status messages
-    finished = pyqtSignal(bool, str)  # Emits (success, message)
-    
-    def __init__(self, repo_url, local_path):
-        super().__init__()
-        self.repo_url = repo_url
-        self.local_path = local_path
-    
-    def run(self):
-        try:
-            import pygit2
-            self.progress.emit(f"Cloning repository...")
-            pygit2.clone_repository(self.repo_url, self.local_path)
-            self.finished.emit(True, "Download complete")
-        except Exception as e:
-            self.finished.emit(False, str(e))
+
+
