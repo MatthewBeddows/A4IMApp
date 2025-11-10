@@ -2,8 +2,6 @@ import sys
 import os
 import requests
 
-# Set high DPI scaling policy
-os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
 
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QStackedWidget, QProgressBar, QMessageBox)
 from PyQt5.QtCore import Qt, QCoreApplication
@@ -541,18 +539,31 @@ class GitFileReaderApp(QMainWindow):
             print(f"Progress: {value}%")
 
 def main():
+    # CRITICAL: Set environment variables BEFORE importing QApplication
+    # Force software rendering to avoid GLX issues
+    os.environ["QT_XCB_GL_INTEGRATION"] = "none"
+    os.environ["LIBGL_ALWAYS_SOFTWARE"] = "1"
+    os.environ["QT_QUICK_BACKEND"] = "software"
+    
+    # Force DPI scaling
+    os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
+    os.environ["QT_SCALE_FACTOR"] = "1.5"  # Adjust this value (1.0 to 3.0)
+    
+    # Enable High DPI scaling BEFORE QApplication
+    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+    QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+    
+    # Use software OpenGL rendering
+    QApplication.setAttribute(Qt.AA_UseSoftwareOpenGL, True)
+    QApplication.setAttribute(Qt.AA_ShareOpenGLContexts, True)
 
-    # Enable High DPI scaling BEFORE creating QApplication
-    QCoreApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
-    QCoreApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
-
-    app = QApplication(sys.argv + ['--disable-seccomp-filter-sandbox'])
-
-    # Configure QtWebEngine for software rendering
-    QCoreApplication.setAttribute(Qt.AA_UseSoftwareOpenGL, True)
-    QCoreApplication.setAttribute(Qt.AA_ShareOpenGLContexts, True)
-
-    # Import and show the Startup Menu (FIRST WINDOW)
+    # NOW create the QApplication
+    app = QApplication(sys.argv)
+    
+    # Alternative: Set scaling factor directly on the application
+    # app.setAttribute(Qt.AA_EnableHighDpiScaling)
+    
+    # Import and show the Startup Menu
     from startup_menu import StartupMenu
     startup = StartupMenu()
     startup.show()
