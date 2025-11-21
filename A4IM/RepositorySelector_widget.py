@@ -433,10 +433,17 @@ class RepositorySelector(QMainWindow):
         
         # Hide this window
         self.hide()
-        
+
         # Import here to avoid circular imports
         from main import GitFileReaderApp
-        
+        from PyQt5.QtCore import QCoreApplication
+
         # Fire up the main app with chosen project
         self.main_window = GitFileReaderApp(selected["url"], selected["folder"])
         self.main_window.show()
+
+        # Process events to ensure window is visible before starting loading
+        QCoreApplication.processEvents()
+
+        # Now start the loading process
+        self.main_window.start_loading()

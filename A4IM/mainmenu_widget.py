@@ -25,7 +25,12 @@ class MainMenuWidget(QWidget):
 
         # Title Image
         title_image = QLabel()
-        pixmap = QPixmap("images/A4IM Logo_pink.png")  # Replace with your image file name
+        # Build absolute path to logo file (it's in A4IM/images/)
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        logo_path = os.path.join(current_dir, "images", "A4IM Logo_pink.png")
+        pixmap = QPixmap(logo_path)
+        if pixmap.isNull():
+            print(f"Warning: Could not load logo from {logo_path}")
         scaled_pixmap = pixmap.scaled(300, 100, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         title_image.setPixmap(scaled_pixmap)
         title_image.setAlignment(Qt.AlignCenter)
@@ -58,114 +63,16 @@ class MainMenuWidget(QWidget):
             ("Exit", self.parent.close)
         ])
 
-        self.button_layout = QVBoxLayout()  # Store as instance variable
-        self.button_layout.setAlignment(Qt.AlignCenter)
+        button_layout = QVBoxLayout()
+        button_layout.setAlignment(Qt.AlignCenter)
         for text, callback in buttons:
             button = self.create_menu_button(text)
             button.clicked.connect(callback)
-            self.button_layout.addWidget(button)
+            button_layout.addWidget(button)
 
-        layout.addLayout(self.button_layout)
+        layout.addLayout(button_layout)
         layout.addStretch()
         self.setLayout(layout)
-
-    def refresh_ui(self):
-        """Refresh the UI to update button visibility"""
-        # Clear existing button layout
-        for i in reversed(range(self.layout().count())):
-            item = self.layout().itemAt(i)
-            if item and isinstance(item, QVBoxLayout):
-                # This is the button layout
-                for j in reversed(range(item.count())):
-                    widget = item.itemAt(j).widget()
-                    if widget:
-                        widget.deleteLater()
-        
-        # Rebuild buttons with updated visibility
-        buttons = []
-        
-        # Only add Project Overview button if architect module has documentation
-        if self.check_architect_documentation():
-            buttons.append(("Project Overview", self.show_project_overview))
-        
-        buttons.extend([
-            ("System View", self.parent.show_system_view),
-            ("Exit", self.parent.close)
-        ])
-        
-        # Find the button layout in the main layout
-        button_layout = None
-        for i in range(self.layout().count()):
-            item = self.layout().itemAt(i)
-            if isinstance(item, QVBoxLayout):
-                button_layout = item
-                break
-        
-        if button_layout:
-            # Add buttons to existing layout
-            for text, callback in buttons:
-                button = self.create_menu_button(text)
-                button.clicked.connect(callback)
-                button_layout.addWidget(button)
-
-    def showEvent(self, event):
-        """Called whenever the widget is shown"""
-        super().showEvent(event)
-        # Rebuild button layout to reflect current state
-        self.rebuild_buttons()
-
-    def rebuild_buttons(self):
-        """Rebuild the button layout based on current state"""
-        # Store reference to button layout during setup
-        if not hasattr(self, 'button_layout'):
-            # Find the button layout
-            for i in range(self.layout().count()):
-                item = self.layout().itemAt(i)
-                if isinstance(item, QVBoxLayout):
-                    # Check if this contains buttons
-                    if item.count() > 0:
-                        first_item = item.itemAt(0)
-                        if first_item and first_item.widget():
-                            first_widget = first_item.widget()
-                            if isinstance(first_widget, QPushButton):
-                                self.button_layout = item
-                                break
-        
-        if not hasattr(self, 'button_layout') or not self.button_layout:
-            print("Warning: Could not find button layout")
-            return
-        
-        # Clear existing buttons
-        while self.button_layout.count():
-            item = self.button_layout.takeAt(0)
-            if item:
-                widget = item.widget()
-                if widget:
-                    widget.setParent(None)
-                    widget.deleteLater()
-        
-        # Rebuild buttons with updated visibility
-        buttons = []
-        
-        # Only add Project Overview button if architect module has documentation
-        has_docs = self.check_architect_documentation()
-        print(f"Checking for architect documentation: {has_docs}")
-        
-        if has_docs:
-            buttons.append(("Project Overview", self.show_project_overview))
-        
-        buttons.extend([
-            ("System View", self.parent.show_system_view),
-            ("Exit", self.parent.close)
-        ])
-        
-        print(f"Rebuilding {len(buttons)} buttons")
-        
-        # Add buttons to layout
-        for text, callback in buttons:
-            button = self.create_menu_button(text)
-            button.clicked.connect(callback)
-            self.button_layout.addWidget(button)
 
     def create_menu_button(self, text):
         button = QPushButton(text)
@@ -189,7 +96,7 @@ class MainMenuWidget(QWidget):
         return button
 
     def check_architect_documentation(self):
-        """Check if the architect module has documentation (in repo or metadata)"""
+        """Check if the architect module has documentation"""
         try:
             # Get the architect folder path
             if not hasattr(self.parent, 'repo_folder') or not self.parent.repo_folder:
@@ -197,151 +104,48 @@ class MainMenuWidget(QWidget):
                 
             repo_dir = os.path.join("Downloaded Repositories", self.parent.repo_folder)
             
+            if not os.path.exists(repo_dir):
+                return False
+            
             # Use the initial_repo_url directly from parent to get the root module name
             if not hasattr(self.parent, 'initial_repo_url') or not self.parent.initial_repo_url:
                 return False
                 
             # Extract repository name from the initial URL
-            repo_name = self.parent.initial_repo_url.split('/')[-1].replace('.git', '')
+            repo_name = self.parent.initial_repo_url.split('/')[-1]
             module_dir = os.path.join(repo_dir, repo_name)
             
-            # Check if module is actually downloaded (has real content)
-            if os.path.exists(module_dir) and os.path.isdir(module_dir):
-                try:
-                    contents = os.listdir(module_dir)
-                    real_contents = [f for f in contents if f.lower() not in ['moduleinfo.txt', 'moduleinfor.txt']]
-                    has_content = len(real_contents) > 0
-                except:
-                    has_content = False
+            # Check for documentation using the new recursive logic
+            return self.check_module_documentation_path(module_dir)
                 
-                if has_content:
-                    # Module is downloaded, check for docs directly
-                    return self.check_module_documentation_path(module_dir)
-            
-            # If not downloaded, check the actual repository online for docs
-            print(f"DEBUG: Checking online repo for docs...")
-            return self.check_docs_exist_in_repo(self.parent.initial_repo_url)
-                    
         except Exception as e:
             print(f"Error checking architect documentation: {e}")
             return False
-        
-    def check_docs_exist_in_repo(self, repo_url):
-        """Check if documentation exists in the remote repository"""
-        try:
-            import requests
-            
-            repo_url = repo_url.strip()
-            if not repo_url.startswith('http'):
-                repo_url = 'https://' + repo_url
-            
-            # Determine if it's GitHub or GitLab
-            is_github = 'github.com' in repo_url
-            is_gitlab = 'gitlab.com' in repo_url
-            
-            if is_github:
-                parts = repo_url.replace('https://github.com/', '').replace('.git', '').split('/')
-                if len(parts) >= 2:
-                    owner, repo = parts[0], parts[1]
-                    branches = ['main', 'master']
-                    
-                    for branch in branches:
-                        # Check for missing.html file
-                        raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/src/doc/_site/missing.html"
-                        response = requests.get(raw_url, timeout=5)
-                        if response.status_code == 200:
-                            print(f"✓ Found docs in {branch} branch")
-                            return True
-            
-            elif is_gitlab:
-                parts = repo_url.replace('https://gitlab.com/', '').replace('.git', '').split('/')
-                if len(parts) >= 2:
-                    owner, repo = parts[0], parts[1]
-                    branches = ['main', 'master']
-                    
-                    for branch in branches:
-                        # Check for missing.html file
-                        raw_url = f"https://gitlab.com/{owner}/{repo}/-/raw/{branch}/src/doc/_site/missing.html"
-                        response = requests.get(raw_url, timeout=5)
-                        if response.status_code == 200:
-                            print(f"✓ Found docs in {branch} branch")
-                            return True
-            
-            print(f"No documentation found in repository")
-            return False
-            
-        except Exception as e:
-            print(f"Error checking for docs in repo: {e}")
-            # If we can't check, assume docs might exist (show button)
-            return True
-
-    def is_architect_module_downloaded(self):
-        """Check if the architect module is actually downloaded"""
-        try:
-            if not hasattr(self.parent, 'repo_folder') or not self.parent.repo_folder:
-                return False
-                
-            repo_dir = os.path.join("Downloaded Repositories", self.parent.repo_folder)
-            
-            if not hasattr(self.parent, 'initial_repo_url') or not self.parent.initial_repo_url:
-                return False
-                
-            # Extract repository name from the initial URL
-            repo_name = self.parent.initial_repo_url.split('/')[-1].replace('.git', '')
-            module_dir = os.path.join(repo_dir, repo_name)
-            
-            # Check if directory exists and has actual content (not just metadata)
-            if os.path.exists(module_dir) and os.path.isdir(module_dir):
-                try:
-                    contents = os.listdir(module_dir)
-                    # Filter out just metadata files
-                    real_contents = [f for f in contents if f.lower() not in ['moduleinfo.txt', 'moduleinfor.txt']]
-                    return len(real_contents) > 0
-                except:
-                    return False
-            
-            return False
-                    
-        except Exception as e:
-            print(f"Error checking if architect module is downloaded: {e}")
-            return False
 
     def check_module_documentation_path(self, module_dir):
-        """Check if a module has documentation file (same logic as SystemView)"""
+        """Check if a module has documentation file using recursive search"""
         if not os.path.exists(module_dir):
             return False
         
-        # Check for documentation file
-        doc_path = os.path.join(module_dir, "src", "doc", "_site", "missing.html")
+        # Recursively search for index.html files
+        def find_index_html(directory):
+            """Recursively search for index.html files"""
+            found_files = []
+            try:
+                for root, dirs, files in os.walk(directory):
+                    for file in files:
+                        if file.lower() == 'index.html':
+                            full_path = os.path.join(root, file)
+                            found_files.append(full_path)
+            except Exception as e:
+                pass
+            return found_files
         
-        # Also check with src in different capitalizations
-        alt_paths = [
-            os.path.join(module_dir, "Src", "doc", "_site", "missing.html"),
-            os.path.join(module_dir, "SRC", "doc", "_site", "missing.html"),
-            # Check with Doc variations
-            os.path.join(module_dir, "src", "Doc", "_site", "missing.html"),
-            os.path.join(module_dir, "src", "DOC", "_site", "missing.html"),
-            # Check with _site variations
-            os.path.join(module_dir, "src", "doc", "_Site", "missing.html"),
-            os.path.join(module_dir, "src", "doc", "_SITE", "missing.html"),
-            # Check with missing.html variations
-            os.path.join(module_dir, "src", "doc", "_site", "Missing.html"),
-            os.path.join(module_dir, "src", "doc", "_site", "MISSING.html"),
-            # Common alternative capitalization combinations
-            os.path.join(module_dir, "Src", "Doc", "_Site", "Missing.html"),
-            os.path.join(module_dir, "SRC", "DOC", "_SITE", "MISSING.html"),
-        ]
+        # Search for all index.html files
+        found_files = find_index_html(module_dir)
         
-        # Check main path first
-        if os.path.exists(doc_path):
-            return True
-        
-        # Then check alternative paths
-        for path in alt_paths:
-            if os.path.exists(path):
-                return True
-                
-        return False
+        # Return True if any index.html files are found
+        return len(found_files) > 0
 
     def get_architect_documentation_path(self):
         """Get the documentation path for the architect module"""
@@ -363,7 +167,7 @@ class MainMenuWidget(QWidget):
             repo_name = self.parent.initial_repo_url.split('/')[-1]
             module_dir = os.path.join(repo_dir, repo_name)
             
-            # Get the documentation path
+            # Get the documentation path using recursive search
             return self.get_module_documentation_path(module_dir)
                 
         except Exception as e:
@@ -371,40 +175,31 @@ class MainMenuWidget(QWidget):
             return None
 
     def get_module_documentation_path(self, module_dir):
-        """Get the documentation file path (same logic as SystemView)"""
+        """Get the documentation file path using recursive search"""
         if not os.path.exists(module_dir):
             return None
         
-        # Check for documentation file
-        doc_path = os.path.join(module_dir, "src", "doc", "_site", "missing.html")
+        # Recursively search for index.html files
+        def find_index_html(directory):
+            """Recursively search for index.html files"""
+            found_files = []
+            try:
+                for root, dirs, files in os.walk(directory):
+                    for file in files:
+                        if file.lower() == 'index.html':
+                            full_path = os.path.join(root, file)
+                            found_files.append(full_path)
+            except Exception as e:
+                pass
+            return found_files
         
-        # Also check with src in different capitalizations
-        alt_paths = [
-            os.path.join(module_dir, "Src", "doc", "_site", "missing.html"),
-            os.path.join(module_dir, "SRC", "doc", "_site", "missing.html"),
-            # Check with Doc variations
-            os.path.join(module_dir, "src", "Doc", "_site", "missing.html"),
-            os.path.join(module_dir, "src", "DOC", "_site", "missing.html"),
-            # Check with _site variations
-            os.path.join(module_dir, "src", "doc", "_Site", "missing.html"),
-            os.path.join(module_dir, "src", "doc", "_SITE", "missing.html"),
-            # Check with missing.html variations
-            os.path.join(module_dir, "src", "doc", "_site", "Missing.html"),
-            os.path.join(module_dir, "src", "doc", "_site", "MISSING.html"),
-            # Common alternative capitalization combinations
-            os.path.join(module_dir, "Src", "Doc", "_Site", "Missing.html"),
-            os.path.join(module_dir, "SRC", "DOC", "_SITE", "MISSING.html"),
-        ]
+        # Search for all index.html files
+        found_files = find_index_html(module_dir)
         
-        # Check main path first
-        if os.path.exists(doc_path):
-            return doc_path
+        # If we found files, return the first one
+        if found_files:
+            return found_files[0]
         
-        # Then check alternative paths
-        for path in alt_paths:
-            if os.path.exists(path):
-                return path
-                
         return None
 
     def find_module_info_file(self, module_dir):
@@ -448,59 +243,13 @@ class MainMenuWidget(QWidget):
                 return 'microsoft' in f.read().lower()
         except:
             return False
-        
-
-    def on_architect_download_finished(self, success, message):
-        """Handle completion of architect module download"""
-        # Close progress dialog
-        if hasattr(self, 'download_progress_msg'):
-            self.download_progress_msg.close()
-            self.download_progress_msg.deleteLater()
-            del self.download_progress_msg
-        
-        from PyQt5.QtWidgets import QMessageBox
-        
-        if success:
-            repo_name = self.parent.initial_repo_url.split('/')[-1].replace('.git', '')
-            QMessageBox.information(self, "Success", f"Downloaded {repo_name}")
-            
-            # Refresh the UI to show the button is now available
-            self.rebuild_buttons()
-            
-            # Now open the documentation
-            self.show_project_overview()
-        else:
-            QMessageBox.critical(self, "Error", f"Failed to download: {message}")
 
     def show_project_overview(self):
         """Open the first documentation page directly in browser"""
-        
-        # Check if module is downloaded
-        if not self.is_architect_module_downloaded():
-            from PyQt5.QtWidgets import QMessageBox
-            
-            # Get the repo name for the message
-            repo_name = self.parent.initial_repo_url.split('/')[-1].replace('.git', '')
-            
-            reply = QMessageBox.question(
-                self, "Download Required",
-                f"The architect module '{repo_name}' needs to be downloaded first to view documentation.\n\n"
-                "Would you like to download it now?",
-                QMessageBox.Yes | QMessageBox.No
-            )
-            
-            if reply == QMessageBox.Yes:
-                # Trigger download of architect module
-                self.download_architect_module()
-            return
-        
-        # Module is downloaded, proceed as normal
         doc_path = self.get_architect_documentation_path()
         
         if not doc_path:
-            from PyQt5.QtWidgets import QMessageBox
-            QMessageBox.information(self, "Documentation Not Found",
-                                "Documentation not found for architect module.")
+            print("No documentation found for architect module")
             return
         
         try:
@@ -518,40 +267,6 @@ class MainMenuWidget(QWidget):
                 
         except Exception as e:
             print(f"Error opening project overview: {e}")
-
-    def download_architect_module(self):
-        """Download the architect module and open docs after completion"""
-        try:
-            from PyQt5.QtCore import QThread, pyqtSignal
-            import pygit2
-            
-            # Get repo info
-            repo_url = self.parent.initial_repo_url
-            repo_name = repo_url.split('/')[-1].replace('.git', '')
-            repo_dir = os.path.join("Downloaded Repositories", self.parent.repo_folder)
-            local_path = os.path.join(repo_dir, repo_name)
-            
-            # Create download worker (reuse the one from systemview_widget)
-            from systemview_widget import DownloadWorker
-            
-            self.download_worker = DownloadWorker(repo_url, local_path)
-            self.download_worker.progress.connect(lambda msg: print(msg))
-            self.download_worker.finished.connect(self.on_architect_download_finished)
-            
-            # Show download in progress message
-            from PyQt5.QtWidgets import QMessageBox
-            self.download_progress_msg = QMessageBox(self)
-            self.download_progress_msg.setWindowTitle("Downloading")
-            self.download_progress_msg.setText(f"Downloading {repo_name}...")
-            self.download_progress_msg.setStandardButtons(QMessageBox.NoButton)
-            self.download_progress_msg.show()
-            
-            # Start download
-            self.download_worker.start()
-            
-        except Exception as e:
-            from PyQt5.QtWidgets import QMessageBox
-            QMessageBox.critical(self, "Error", f"Failed to start download: {str(e)}")
 
     def get_first_documentation_link(self, html_file_path):
         """Extract the first documentation link from HTML file (exact same logic as GitBuildingWindow)"""
@@ -630,8 +345,6 @@ class MainMenuWidget(QWidget):
         except Exception as e:
             print(f"Error extracting first documentation link: {e}")
             return None
-
-
 
     def open_documentation_in_browser(self, doc_path):
         """Open the HTML file in the default browser"""

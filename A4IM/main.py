@@ -12,6 +12,7 @@ from systemview_widget import SystemView
 from download_thread import DownloadThread
 from gitbuilding_setup import GitBuildingSetup
 from RepositorySelector_widget import RepositorySelector
+from loading_widget import LoadingWidget
 
 class GitFileReaderApp(QMainWindow):
     def __init__(self, initial_repo_url, repo_folder):
@@ -28,20 +29,27 @@ class GitFileReaderApp(QMainWindow):
         self.setCentralWidget(self.central_widget)
         
         # Initialize UI components
+        self.loading_widget = LoadingWidget(self)
         self.main_menu = MainMenuWidget(self)
         self.system_view = SystemView(self)
         self.git_building = GitBuildingWindow(self)
-        
+
         # Add widgets to the stacked widget
+        self.central_widget.addWidget(self.loading_widget)
         self.central_widget.addWidget(self.main_menu)
         self.central_widget.addWidget(self.system_view)
         self.central_widget.addWidget(self.git_building)
-        
+
+        # Show loading widget initially
+        self.central_widget.setCurrentWidget(self.loading_widget)
+        self.loading_widget.update_message("Loading project...")
+        self.loading_widget.update_status("Initializing...")
+
         # Set up GitBuilding
         self.git_building_runner = GitBuildingSetup()
         self.git_building_runner.log.connect(self.on_git_building_log)
         self.run_git_building()
-    
+
         # Hide the main menu initially
         self.main_menu.hide()
         
@@ -57,79 +65,93 @@ class GitFileReaderApp(QMainWindow):
         # Keep track of active threads
         self.active_threads = []
 
-        # Start downloading the initial repository
+        # Don't start downloading yet - wait for window to be shown
+        # This will be triggered by calling start_loading() after show()
+
+    def start_loading(self):
+        """Start the loading process - call this after showing the window"""
         self.download_initial_repository()
 
-
-    def fetch_module_info_only(self, repo_url):
+    def fetch_module_info_only(self, repo_url, verbose=False):
         """Fetch only ModuleInfo.txt from a Git repository (GitHub or GitLab)"""
         try:
             repo_url = repo_url.strip()
             if not repo_url.startswith('http'):
                 repo_url = 'https://' + repo_url
-            
+
             # Determine if it's GitHub or GitLab
             is_github = 'github.com' in repo_url
             is_gitlab = 'gitlab.com' in repo_url
-            
+
             if is_github:
                 parts = repo_url.replace('https://github.com/', '').replace('.git', '').split('/')
                 if len(parts) >= 2:
                     owner, repo = parts[0], parts[1]
                     branches = ['main', 'master']
                     filenames = ['ModuleInfo.txt', 'moduleInfo.txt', 'moduleinfo.txt', 'ModuleInfor.txt']
-                    
+
                     for branch in branches:
                         for filename in filenames:
                             raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{filename}"
-                            print(f"Trying GitHub: {raw_url}")
+                            if verbose:
+                                print(f"Trying GitHub: {raw_url}")
                             response = requests.get(raw_url, timeout=10)
                             if response.status_code == 200:
-                                print(f"✓ Found {filename} on {branch}")
+                                if verbose:
+                                    print(f"✓ Found {filename} on {branch}")
                                 return response.text
-            
+
             elif is_gitlab:
                 parts = repo_url.replace('https://gitlab.com/', '').replace('.git', '').split('/')
                 if len(parts) >= 2:
                     owner, repo = parts[0], parts[1]
                     branches = ['main', 'master']
                     filenames = ['ModuleInfo.txt', 'moduleInfo.txt', 'moduleinfo.txt', 'ModuleInfor.txt']
-                    
+
                     for branch in branches:
                         for filename in filenames:
                             raw_url = f"https://gitlab.com/{owner}/{repo}/-/raw/{branch}/{filename}"
-                            print(f"Trying GitLab: {raw_url}")
+                            if verbose:
+                                print(f"Trying GitLab: {raw_url}")
                             response = requests.get(raw_url, timeout=10)
                             if response.status_code == 200:
-                                print(f"✓ Found {filename} on {branch}")
+                                if verbose:
+                                    print(f"✓ Found {filename} on {branch}")
                                 return response.text
-            
-            print(f"Could not find ModuleInfo.txt in repository")
+
+            if verbose:
+                print(f"Could not find ModuleInfo.txt in repository")
             return None
-            
+
         except Exception as e:
-            print(f"Failed to fetch ModuleInfo.txt: {e}")
-            import traceback
-            traceback.print_exc()
+            if verbose:
+                print(f"Failed to fetch ModuleInfo.txt: {e}")
+                import traceback
+                traceback.print_exc()
             return None
         
 
     def download_initial_repository(self):
         """Only fetch ModuleInfo.txt - no full clone"""
         import datetime
-        
+
         repo_name = self.initial_repo_url.split('/')[-1].replace('.git', '')
         download_dir = os.path.join(os.getcwd(), "Downloaded Repositories")
         repo_dir = os.path.join(download_dir, self.repo_folder)
         metadata_dir = os.path.join(repo_dir, ".metadata")
-        
+
         os.makedirs(metadata_dir, exist_ok=True)
-        
+
         print(f"Fetching ModuleInfo.txt from: {self.initial_repo_url}")
-        
+
+        # Update loading screen
+        self.loading_widget.update_message("Fetching project information...")
+        self.loading_widget.update_status(f"Loading {repo_name}...")
+        QCoreApplication.processEvents()
+
         # Fetch just the ModuleInfo.txt content
         module_info_content = self.fetch_module_info_only(self.initial_repo_url)
-        
+
         if module_info_content:
             # Save to metadata folder
             module_info_path = os.path.join(metadata_dir, f"{repo_name}_ModuleInfo.txt")
@@ -137,32 +159,36 @@ class GitFileReaderApp(QMainWindow):
                 f.write(module_info_content)
                 timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 f.write(f"\n[Deployed] {timestamp}")
-            
+
             print(f"✓ Saved ModuleInfo.txt to {module_info_path}")
             self.parse_initial_module(module_info_path, repo_name)
         else:
-            QMessageBox.critical(self, "Error", 
+            QMessageBox.critical(self, "Error",
                             f"Could not fetch ModuleInfo.txt from:\n{self.initial_repo_url}\n\n"
                             "Please check the repository URL and ensure ModuleInfo.txt exists.")
 
     def fetch_submodule_infos(self, module_addresses):
         """Fetch ModuleInfo.txt for multiple submodules"""
         metadata_dir = os.path.join("Downloaded Repositories", self.repo_folder, ".metadata")
-        
-        for address in module_addresses:
+
+        total = len(module_addresses)
+        for idx, address in enumerate(module_addresses, 1):
             repo_name = address.split('/')[-1].replace('.git', '')
-            
-            print(f"Fetching {repo_name}...")
-            content = self.fetch_module_info_only(address)
-            
+
+            # Update loading screen
+            self.loading_widget.update_status(f"Loading module {idx}/{total}: {repo_name}")
+            self.loading_widget.set_progress(idx, total)
+            QCoreApplication.processEvents()  # Update UI
+
+            content = self.fetch_module_info_only(address, verbose=False)
+
             if content:
                 # Save to metadata folder
                 module_info_path = os.path.join(metadata_dir, f"{repo_name}_ModuleInfo.txt")
                 with open(module_info_path, 'w') as f:
                     f.write(content)
-                print(f"✓ Saved {repo_name}")
             else:
-                print(f"✗ Could not fetch {repo_name}")
+                print(f"Warning: Could not fetch module info for {repo_name}")
 
 
     def check_if_all_complete(self):
