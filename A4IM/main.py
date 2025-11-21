@@ -145,7 +145,7 @@ class GitFileReaderApp(QMainWindow):
         print(f"Fetching ModuleInfo.txt from: {self.initial_repo_url}")
 
         # Update loading screen
-        self.loading_widget.update_message("Fetching project information...")
+        self.loading_widget.update_message("Fetching initial modules...")
         self.loading_widget.update_status(f"Loading {repo_name}...")
         QCoreApplication.processEvents()
 
@@ -167,11 +167,19 @@ class GitFileReaderApp(QMainWindow):
                             f"Could not fetch ModuleInfo.txt from:\n{self.initial_repo_url}\n\n"
                             "Please check the repository URL and ensure ModuleInfo.txt exists.")
 
-    def fetch_submodule_infos(self, module_addresses):
+    def fetch_submodule_infos(self, module_addresses, parent_module_name=None):
         """Fetch ModuleInfo.txt for multiple submodules"""
         metadata_dir = os.path.join("Downloaded Repositories", self.repo_folder, ".metadata")
 
         total = len(module_addresses)
+
+        # Update main message for submodules
+        if parent_module_name:
+            self.loading_widget.update_message(f"Fetching {parent_module_name} submodules...")
+        else:
+            self.loading_widget.update_message(f"Fetching {total} submodules...")
+        QCoreApplication.processEvents()
+
         for idx, address in enumerate(module_addresses, 1):
             repo_name = address.split('/')[-1].replace('.git', '')
 
@@ -346,7 +354,7 @@ class GitFileReaderApp(QMainWindow):
         # Fetch submodule ModuleInfo.txt files (not full repos)
         if cleaned_addresses:
             print(f"Fetching info for {len(cleaned_addresses)} submodules...")
-            self.fetch_submodule_infos(cleaned_addresses)
+            self.fetch_submodule_infos(cleaned_addresses, module_name)
             self.parse_submodule_infos([module_name], cleaned_addresses)
         
         # Load complete - show main menu
@@ -549,10 +557,10 @@ class GitFileReaderApp(QMainWindow):
                 }
                 
                 print(f"Added module info: {module_name}")
-                
+
                 # Recursively fetch child module infos
                 if cleaned_addresses:
-                    self.fetch_submodule_infos(cleaned_addresses)
+                    self.fetch_submodule_infos(cleaned_addresses, module_name)
                     new_path = parent_module_path.copy()
                     new_path.append(module_name)
                     self.parse_submodule_infos(new_path, cleaned_addresses)
