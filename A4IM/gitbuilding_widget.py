@@ -793,6 +793,6 @@ class GitBuildingWindow(QWidget):
             QMessageBox.warning(self, "Error", f"Could not open folder: {str(e)}")
 
     def go_back(self):
-        """Return to the previous view"""
-        if self.parent and hasattr(self.parent, 'central_widget'):
-            self.parent.central_widget.setCurrentIndex(1)
+        """Return to the System View"""
+        if self.parent and hasattr(self.parent, 'show_system_view'):
+            self.parent.show_system_view()

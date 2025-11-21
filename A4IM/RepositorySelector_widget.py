@@ -101,8 +101,16 @@ class RepositorySelector(QMainWindow):
         add_button = QPushButton("Add Custom Repository")
         add_button.clicked.connect(self.add_custom_repository)
         custom_layout.addWidget(add_button)
-        
+
         layout.addWidget(custom_group)
+
+        # Add spacing before back button
+        layout.addStretch()
+
+        # Add back button at the bottom
+        back_button = QPushButton("← Back")
+        back_button.clicked.connect(self.go_back)
+        layout.addWidget(back_button)
 
     def update_list_widget(self):
         """Update the QListWidget with current projects"""
@@ -447,3 +455,14 @@ class RepositorySelector(QMainWindow):
 
         # Now start the loading process
         self.main_window.start_loading()
+
+    def go_back(self):
+        """Go back to the welcome/startup screen"""
+        self.hide()
+
+        # Import here to avoid circular imports
+        from startup_menu import StartupMenu
+
+        # Show the startup menu
+        self.startup_menu = StartupMenu()
+        self.startup_menu.show()
