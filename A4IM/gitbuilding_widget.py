@@ -242,13 +242,13 @@ class GitBuildingWindow(QWidget):
             return None
 
     def find_module_info_file(self, module_dir):
-        """Find the module info file with case-insensitive search and variation handling"""
+        """Find the module info file in lib folder with case-insensitive search"""
         if not os.path.exists(module_dir):
             return None
-            
+
         possible_filenames = [
             "ModuleInfo.txt",
-            "moduleInfo.txt", 
+            "moduleInfo.txt",
             "moduleinfo.txt",
             "MODULEINFO.txt",
             "ModuleInfor.txt",
@@ -257,22 +257,26 @@ class GitBuildingWindow(QWidget):
             "Module_Info.txt",
             "module_info.txt"
         ]
-        
+
+        lib_dir = os.path.join(module_dir, "lib")
+
+        # Check for exact filename matches in lib folder
         for filename in possible_filenames:
-            file_path = os.path.join(module_dir, filename)
+            file_path = os.path.join(lib_dir, filename)
             if os.path.exists(file_path):
                 return file_path
-        
-        # If no exact match is found, try a case-insensitive search
-        try:
-            existing_files = os.listdir(module_dir)
-            for existing_file in existing_files:
-                lower_file = existing_file.lower()
-                if "moduleinfo" in lower_file or "moduleinfor" in lower_file:
-                    return os.path.join(module_dir, existing_file)
-        except:
-            pass
-        
+
+        # Case-insensitive search in lib folder
+        if os.path.exists(lib_dir):
+            try:
+                existing_files = os.listdir(lib_dir)
+                for existing_file in existing_files:
+                    lower_file = existing_file.lower()
+                    if "moduleinfo" in lower_file or "moduleinfor" in lower_file:
+                        return os.path.join(lib_dir, existing_file)
+            except:
+                pass
+
         return None  # No matching file found
 
     def load_task_progress(self):

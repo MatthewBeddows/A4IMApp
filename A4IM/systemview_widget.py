@@ -664,19 +664,19 @@ class SystemView(QWidget):
         """Load assigned_to and completed status from ModuleInfo.txt"""
         if not module_data or not isinstance(module_data, dict):
             return
-            
+
         repository_info = module_data.get('repository', {})
         if not repository_info or not repository_info.get('name'):
             return
-            
+
         # Get the repository folder
         repo_dir = os.path.join("Downloaded Repositories", self.parent.repo_folder)
         module_dir = os.path.join(repo_dir, repository_info.get('name'))
-        
+
         if not os.path.exists(module_dir):
             return
-        
-        # Find ModuleInfo.txt file
+
+        # Find ModuleInfo.txt file in lib folder
         module_info_path = self.find_module_info_file(module_dir)
         
         if not module_info_path:
@@ -721,19 +721,19 @@ class SystemView(QWidget):
         """Save assigned_to and completed status to ModuleInfo.txt"""
         if not module_data or not isinstance(module_data, dict):
             return False
-            
+
         repository_info = module_data.get('repository', {})
         if not repository_info or not repository_info.get('name'):
             return False
-            
+
         # Get the repository folder
         repo_dir = os.path.join("Downloaded Repositories", self.parent.repo_folder)
         module_dir = os.path.join(repo_dir, repository_info.get('name'))
-        
+
         if not os.path.exists(module_dir):
             return False
-        
-        # Find ModuleInfo.txt file
+
+        # Find ModuleInfo.txt file in lib folder
         module_info_path = self.find_module_info_file(module_dir)
         
         if not module_info_path:
@@ -1248,31 +1248,24 @@ class SystemView(QWidget):
             QMessageBox.critical(self, "Error", f"Failed to open CSV viewer: {str(e)}")
 
     def check_for_bom_file(self, module_data):
-        """Check if a module has a BOM.csv file in the lib folder"""
+        """Check if a module has a BOM.csv file in src/lib folder"""
         if not module_data or not isinstance(module_data, dict):
-            return None  # Changed from False to None
-                
+            return None
+
         repository_info = module_data.get('repository', {})
         if not repository_info or not repository_info.get('name'):
-            return None  # Changed from False to None
-                
+            return None
+
         # Get the repository folder
         repo_dir = os.path.join("Downloaded Repositories", self.parent.repo_folder)
         module_dir = os.path.join(repo_dir, repository_info.get('name'))
-        
+
         if not os.path.exists(module_dir):
-            return None  # Changed from False to None
-        
-        # Check specifically for BOM.csv in the lib folder
-        lib_folder = os.path.join(module_dir, "lib")
-        
-        # First check if lib folder exists
-        if not os.path.exists(lib_folder) or not os.path.isdir(lib_folder):
-            return None  # Changed from False to None
-            
-        # Then check for BOM.csv file
-        bom_file = os.path.join(lib_folder, "BOM.csv")
-        return bom_file if os.path.exists(bom_file) else None  # Return the path, not True/False
+            return None
+
+        # Check for BOM.csv in the src/lib folder
+        bom_file = os.path.join(module_dir, "src", "lib", "BOM.csv")
+        return bom_file if os.path.exists(bom_file) else None
 
 
     # View project info
@@ -1509,7 +1502,7 @@ class SystemView(QWidget):
         return None
 
     def find_module_info_file(self, module_dir):
-        """Find the module info file with case-insensitive search and variation handling"""
+        """Find the module info file in lib folder with case-insensitive search"""
         possible_filenames = [
             "ModuleInfo.txt",
             "moduleInfo.txt",
@@ -1521,20 +1514,26 @@ class SystemView(QWidget):
             "Module_Info.txt",
             "module_info.txt"
         ]
-        
+
+        lib_dir = os.path.join(module_dir, "lib")
+
+        # Check for exact filename matches in lib folder
         for filename in possible_filenames:
-            file_path = os.path.join(module_dir, filename)
+            file_path = os.path.join(lib_dir, filename)
             if os.path.exists(file_path):
                 return file_path
-        
-        # If no exact match is found, try a case-insensitive search
-        if os.path.exists(module_dir):
-            existing_files = os.listdir(module_dir)
-            for existing_file in existing_files:
-                lower_file = existing_file.lower()
-                if "moduleinfo" in lower_file or "moduleinfor" in lower_file:
-                    return os.path.join(module_dir, existing_file)
-        
+
+        # Case-insensitive search in lib folder
+        if os.path.exists(lib_dir):
+            try:
+                existing_files = os.listdir(lib_dir)
+                for existing_file in existing_files:
+                    lower_file = existing_file.lower()
+                    if "moduleinfo" in lower_file or "moduleinfor" in lower_file:
+                        return os.path.join(lib_dir, existing_file)
+            except:
+                pass
+
         return None  # No matching file found
 
     # Update node visibility (used when toggling)
@@ -1546,37 +1545,38 @@ class SystemView(QWidget):
 
 
     def check_risk_assessment_file(self, module_data):
-        """Check if a risk assessment CSV file exists for the module"""
+        """Check if a risk assessment CSV file exists for the module in doc folder"""
         if not module_data or not isinstance(module_data, dict):
             return None
-            
+
         repository_info = module_data.get('repository', {})
         if not repository_info or not repository_info.get('name'):
             return None
-            
+
         # Get the repository folder
         repo_dir = os.path.join("Downloaded Repositories", self.parent.repo_folder)
         module_dir = os.path.join(repo_dir, repository_info.get('name'))
-        
+
         if not os.path.exists(module_dir):
             return None
-        
-        # Check for risk assessment CSV file with different capitalizations
+
+        # Check for risk assessment CSV file with different capitalizations in doc folder
         possible_filenames = [
-            "RiskAssessment.csv", 
-            "riskassessment.csv", 
-            "RISKASSESSMENT.csv", 
-            "Risk_Assessment.csv", 
+            "RiskAssessment.csv",
+            "riskassessment.csv",
+            "RISKASSESSMENT.csv",
+            "Risk_Assessment.csv",
             "risk_assessment.csv",
             "risk-assessment.csv",
             "Risk-Assessment.csv"
         ]
-        
+
+        doc_folder = os.path.join(module_dir, "doc")
         for filename in possible_filenames:
-            file_path = os.path.join(module_dir, filename)
+            file_path = os.path.join(doc_folder, filename)
             if os.path.exists(file_path):
                 return file_path
-                
+
         return None
 
     def open_risk_assessment(self):

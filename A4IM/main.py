@@ -92,13 +92,13 @@ class GitFileReaderApp(QMainWindow):
 
                     for branch in branches:
                         for filename in filenames:
-                            raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{filename}"
+                            raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/lib/{filename}"
                             if verbose:
                                 print(f"Trying GitHub: {raw_url}")
                             response = requests.get(raw_url, timeout=10)
                             if response.status_code == 200:
                                 if verbose:
-                                    print(f"✓ Found {filename} on {branch}")
+                                    print(f"✓ Found {filename} in lib/ on {branch}")
                                 return response.text
 
             elif is_gitlab:
@@ -110,13 +110,13 @@ class GitFileReaderApp(QMainWindow):
 
                     for branch in branches:
                         for filename in filenames:
-                            raw_url = f"https://gitlab.com/{owner}/{repo}/-/raw/{branch}/{filename}"
+                            raw_url = f"https://gitlab.com/{owner}/{repo}/-/raw/{branch}/lib/{filename}"
                             if verbose:
                                 print(f"Trying GitLab: {raw_url}")
                             response = requests.get(raw_url, timeout=10)
                             if response.status_code == 200:
                                 if verbose:
-                                    print(f"✓ Found {filename} on {branch}")
+                                    print(f"✓ Found {filename} in lib/ on {branch}")
                                 return response.text
 
             if verbose:
@@ -234,17 +234,19 @@ class GitFileReaderApp(QMainWindow):
 
 
     def add_timestamp_to_module_info(self, repo_path):
-        """Add a deployment timestamp to the ModuleInfo.txt file"""
+        """Add a deployment timestamp to the ModuleInfo.txt file in lib folder"""
         module_info_path = None
-        
-        # Find ModuleInfo.txt with case-insensitive search
+
+        # Find ModuleInfo.txt in lib folder with case-insensitive search
+        lib_path = os.path.join(repo_path, "lib")
         try:
-            for filename in os.listdir(repo_path):
-                if filename.lower() == "moduleinfo.txt":
-                    module_info_path = os.path.join(repo_path, filename)
-                    break
+            if os.path.exists(lib_path):
+                for filename in os.listdir(lib_path):
+                    if filename.lower() == "moduleinfo.txt":
+                        module_info_path = os.path.join(lib_path, filename)
+                        break
         except Exception as e:
-            print(f"Error listing directory {repo_path}: {str(e)}")
+            print(f"Error listing directory {lib_path}: {str(e)}")
             return
             
         if module_info_path:
@@ -400,14 +402,16 @@ class GitFileReaderApp(QMainWindow):
         for address in addresses:
             repo_name = address.split('/')[-1]
             repo_path = os.path.join(repo_dir, repo_name)
-            
-            # Find ModuleInfo.txt
+
+            # Find ModuleInfo.txt in lib folder
             module_info_path = None
             if os.path.exists(repo_path):
-                for filename in os.listdir(repo_path):
-                    if filename.lower() == "moduleinfo.txt":
-                        module_info_path = os.path.join(repo_path, filename)
-                        break
+                lib_path = os.path.join(repo_path, "lib")
+                if os.path.exists(lib_path):
+                    for filename in os.listdir(lib_path):
+                        if filename.lower() == "moduleinfo.txt":
+                            module_info_path = os.path.join(lib_path, filename)
+                            break
             
             if module_info_path and os.path.exists(module_info_path):
                 # Parse the module info
