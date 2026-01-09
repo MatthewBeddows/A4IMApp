@@ -9,11 +9,67 @@ from PyQt5.QtCore import QUrl, QThread, pyqtSignal
 import math
 import os
 import tempfile
-import re 
+import re
 import pygit2
 import subprocess
+import platform
 from collections import OrderedDict
 from download_manager import DownloadManager , DownloadWorker
+
+
+class BrowserOpenerThread(QThread):
+    """Thread for opening browsers/URLs without blocking the UI"""
+    error_signal = pyqtSignal(str)
+    info_signal = pyqtSignal(str, str)  # title, message
+
+    def __init__(self, url, is_wsl=False):
+        super().__init__()
+        self.url = url
+        self.is_wsl = is_wsl
+
+    def run(self):
+        try:
+            if self.is_wsl:
+                subprocess.run(['powershell.exe', 'start', self.url])
+            else:
+                import webbrowser
+                webbrowser.open(self.url)
+        except Exception as e:
+            self.error_signal.emit(str(e))
+
+
+class FolderOpenerThread(QThread):
+    """Thread for opening folders without blocking the UI"""
+    error_signal = pyqtSignal(str)
+    info_signal = pyqtSignal(str, str)  # title, message
+
+    def __init__(self, folder_path, is_wsl=False):
+        super().__init__()
+        self.folder_path = folder_path
+        self.is_wsl = is_wsl
+
+    def run(self):
+        try:
+            if self.is_wsl:
+                # Convert path to Windows format
+                process = subprocess.run(['wslpath', '-w', self.folder_path],
+                                       capture_output=True, text=True, check=True)
+                windows_path = process.stdout.strip()
+                subprocess.run(['explorer.exe', windows_path])
+            elif platform.system() == "Windows":
+                subprocess.run(['explorer', self.folder_path])
+            else:
+                # For non-Windows, just show the path
+                self.info_signal.emit("Folder Path", f"Your project folder is located at:\n{self.folder_path}")
+        except Exception as e:
+            # If wslpath fails, try powershell fallback
+            if self.is_wsl:
+                try:
+                    subprocess.run(['powershell.exe', 'start', self.folder_path])
+                except:
+                    self.info_signal.emit("Folder Path", f"Your project folder is located at:\n{self.folder_path}")
+            else:
+                self.error_signal.emit(str(e))
 
 #class for creating modules
 class AddModuleDialog(QDialog):
@@ -260,6 +316,8 @@ class SystemView(QWidget):
         self.modules_data = {}  # Store modules data
         self.project_name = None  # Store the project name dynamically
         self.download_manager = DownloadManager(self)
+        self.browser_thread = None  # Keep reference to browser thread
+        self.folder_thread = None  # Keep reference to folder thread
         self.setup_ui()
 
 
@@ -1383,14 +1441,19 @@ class SystemView(QWidget):
                     line.setVisible(n.isVisible())
 
     def open_project_folder(self):
-        """Open the project folder in the system file explorer - WSL compatible"""
+        """Open the project folder in the system file explorer - WSL compatible (threaded)"""
         try:
+            # Stop existing thread if still running
+            if self.folder_thread and self.folder_thread.isRunning():
+                print("Folder thread already running, ignoring duplicate click")
+                return
+
             repo_dir = os.path.join(os.getcwd(), "Downloaded Repositories", self.parent.repo_folder)
-            
+
             if not os.path.exists(repo_dir):
                 QMessageBox.warning(self, "Folder Not Found", "Project folder does not exist.")
                 return
-            
+
             # Check for WSL
             is_wsl = False
             try:
@@ -1399,34 +1462,17 @@ class SystemView(QWidget):
                         is_wsl = True
             except:
                 pass
-                
-            if is_wsl:
-                # For WSL, convert path to Windows format and use explorer.exe
-                try:
-                    # Get Windows path using wslpath
-                    process = subprocess.run(['wslpath', '-w', repo_dir], 
-                                            capture_output=True, text=True, check=True)
-                    windows_path = process.stdout.strip()
-                    
-                    # Use Windows explorer to open the folder
-                    subprocess.run(['explorer.exe', windows_path])
-                except Exception as e:
-                    # Try powershell.exe as a fallback
-                    try:
-                        subprocess.run(['powershell.exe', 'start', repo_dir])
-                    except:
-                        QMessageBox.information(self, "Folder Path", 
-                                            f"Your project folder is located at:\n{repo_dir}")
-            else:
-                # Standard Linux/Unix/Mac handling
-                import platform
-                if platform.system() == "Windows":
-                    subprocess.run(['explorer', repo_dir])
-                else:
-                    # Show dialog with path - simplest solution
-                    QMessageBox.information(self, "Folder Path", 
-                                        f"Your project folder is located at:\n{repo_dir}")
-                
+
+            # Use threaded folder opener
+            self.folder_thread = FolderOpenerThread(repo_dir, is_wsl=is_wsl)
+            self.folder_thread.error_signal.connect(lambda msg: QMessageBox.warning(
+                self, "Error", f"Could not open folder: {msg}"
+            ))
+            self.folder_thread.info_signal.connect(lambda title, msg: QMessageBox.information(
+                self, title, msg
+            ))
+            self.folder_thread.start()
+
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Could not open folder: {str(e)}")
 
@@ -1441,22 +1487,42 @@ class SystemView(QWidget):
                     url = 'https://' + url
 
                 try:
-                    # Use powershell.exe through WSL to open the URL in Windows' default browser
-                    
-                    subprocess.run(['powershell.exe', 'start', url])
+                    # Stop existing thread if still running
+                    if self.browser_thread and self.browser_thread.isRunning():
+                        print("Browser thread already running, ignoring duplicate click")
+                        return
+
+                    # Check for WSL
+                    is_wsl = False
+                    try:
+                        with open('/proc/version', 'r') as f:
+                            if 'microsoft' in f.read().lower():
+                                is_wsl = True
+                    except:
+                        pass
+
+                    # Use threaded browser opener
+                    self.browser_thread = BrowserOpenerThread(url, is_wsl=is_wsl)
+                    self.browser_thread.error_signal.connect(lambda msg: self.show_url_copy_dialog(url))
+                    self.browser_thread.start()
+
                 except Exception as e:
-                    msg = QMessageBox(self)
-                    msg.setIcon(QMessageBox.Information)
-                    msg.setWindowTitle("Repository Link")
-                    msg.setText("Unable to open browser automatically.\nPlease copy this URL:")
-                    msg.setInformativeText(url)
-                    msg.setStandardButtons(QMessageBox.Ok)
-                    
-                    # Add copy button
-                    copy_button = msg.addButton("Copy URL", QMessageBox.ActionRole)
-                    copy_button.clicked.connect(lambda: self.copy_to_clipboard(url))
-                    
-                    msg.exec_()
+                    self.show_url_copy_dialog(url)
+
+    def show_url_copy_dialog(self, url):
+        """Show dialog with URL copy option"""
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Information)
+        msg.setWindowTitle("Repository Link")
+        msg.setText("Unable to open browser automatically.\nPlease copy this URL:")
+        msg.setInformativeText(url)
+        msg.setStandardButtons(QMessageBox.Ok)
+
+        # Add copy button
+        copy_button = msg.addButton("Copy URL", QMessageBox.ActionRole)
+        copy_button.clicked.connect(lambda: self.copy_to_clipboard(url))
+
+        msg.exec_()
 
     def copy_to_clipboard(self, text):
         """Helper method to copy text to clipboard"""

@@ -1,15 +1,49 @@
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QPushButton, QLabel, QFrame
-from PyQt5.QtCore import Qt, QUrl
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QPushButton, QLabel, QFrame, QMessageBox
+from PyQt5.QtCore import Qt, QUrl, QThread, pyqtSignal
 from PyQt5.QtGui import QFont, QColor, QPalette, QPixmap
 import os
 import re
 import subprocess
 import webbrowser
 
+
+class BrowserOpenerThread(QThread):
+    """Thread for opening browsers/URLs without blocking the UI"""
+    error_signal = pyqtSignal(str)
+
+    def __init__(self, url, is_wsl=False, is_file=True):
+        super().__init__()
+        self.url = url
+        self.is_wsl = is_wsl
+        self.is_file = is_file
+
+    def run(self):
+        try:
+            if self.is_wsl:
+                # WSL handling
+                try:
+                    powershell_command = f'Start-Process "{self.url}"'
+                    subprocess.run(['powershell.exe', '-Command', powershell_command])
+                except Exception as e:
+                    try:
+                        subprocess.run(['explorer.exe', self.url])
+                    except Exception as e2:
+                        self.error_signal.emit(self.url)
+            else:
+                # Standard handling
+                if self.is_file:
+                    file_url = 'file://' + os.path.abspath(self.url)
+                    webbrowser.open(file_url)
+                else:
+                    webbrowser.open(self.url)
+        except Exception as e:
+            self.error_signal.emit(f"Failed to open browser: {str(e)}")
+
 class MainMenuWidget(QWidget):
     def __init__(self, parent):
         super().__init__()
         self.parent = parent
+        self.browser_thread = None  # Keep reference to browser thread
         self.setup_ui()
 
     def setup_ui(self):
@@ -351,53 +385,39 @@ class MainMenuWidget(QWidget):
             return None
 
     def open_documentation_in_browser(self, doc_path):
-        """Open the HTML file in the default browser"""
+        """Open the HTML file in the default browser (threaded)"""
         if not doc_path:
-            from PyQt5.QtWidgets import QMessageBox
             QMessageBox.warning(self, "Error", "No documentation URL available.")
             return
-            
+
         try:
-            # Check for WSL
             is_wsl = self.is_wsl()
-                
+
             if is_wsl:
-                # Create the correct WSL URL format with proper slash
-                # Make sure there's a slash between Ubuntu and the path
+                # Create the correct WSL URL format
                 if doc_path.startswith('/'):
                     wsl_url = f"file://wsl.localhost/Ubuntu{doc_path}"
                 else:
                     wsl_url = f"file://wsl.localhost/Ubuntu/{doc_path}"
-                
-                # Log the URL we're trying
-                print(f"Opening browser with correct WSL URL: {wsl_url}")
-                
-                # Try multiple methods to open the file
-                try:
-                    # Method 1: PowerShell Start-Process (exact same as GitBuildingWindow)
-                    powershell_command = f'Start-Process "{wsl_url}"'
-                    subprocess.run(['powershell.exe', '-Command', powershell_command])
-                except Exception as e:
-                    print(f"PowerShell error: {e}")
-                    
-                    try:
-                        # Method 2: Use the explorer.exe approach (exact same as GitBuildingWindow)
-                        subprocess.run(['explorer.exe', wsl_url])
-                    except Exception as e2:
-                        print(f"Explorer error: {e2}")
-                        
-                        # Method 3: Show the URL for manual copying
-                        from PyQt5.QtWidgets import QMessageBox
-                        QMessageBox.information(self, "Browser URL", 
-                                         f"Please copy and paste this URL into your browser:\n\n{wsl_url}")
+
+                print(f"Opening browser with WSL URL: {wsl_url}")
+
+                # Use threaded browser opener
+                self.browser_thread = BrowserOpenerThread(wsl_url, is_wsl=True, is_file=True)
+                self.browser_thread.error_signal.connect(lambda msg: QMessageBox.information(
+                    self, "Browser URL", f"Please copy and paste this URL into your browser:\n\n{wsl_url}"
+                ))
+                self.browser_thread.start()
             else:
-                # For non-WSL environments, use standard browser opening
-                file_url = 'file://' + os.path.abspath(doc_path)
-                webbrowser.open(file_url)
-                    
+                # For non-WSL environments, use threaded browser opener
+                self.browser_thread = BrowserOpenerThread(doc_path, is_wsl=False, is_file=True)
+                self.browser_thread.error_signal.connect(lambda msg: QMessageBox.warning(
+                    self, "Error", f"Could not open HTML file: {msg}"
+                ))
+                self.browser_thread.start()
+
         except Exception as e:
             print(f"Error opening HTML file: {e}")
-            from PyQt5.QtWidgets import QMessageBox
             QMessageBox.warning(self, "Error", f"Could not open HTML file: {str(e)}")
 
     def show_intro(self):
