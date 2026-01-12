@@ -1339,34 +1339,68 @@ class SystemView(QWidget):
             print("No project selected")
 
     def construct_module(self):
-        """Open the module documentation in the web browser"""
+        """Show list of markdown files from src/doc folder"""
 
         if not self.selected_node.is_downloaded:
-            QMessageBox.warning(self, "Not Downloaded", 
+            QMessageBox.warning(self, "Not Downloaded",
                             "Please download this module first to view documentation.")
             return
 
         if not self.selected_node:
             QMessageBox.warning(self, "Error", "No module selected.")
             return
-        
-        # Check for documentation file
-        doc_path = self.check_module_documentation(self.selected_node.data)
-        
-        if not doc_path:
-            QMessageBox.information(self, "Documentation Not Found", 
-                                "Documentation not found for this module.")
+
+        # Get the module directory
+        repository_info = self.selected_node.data.get('repository', {})
+        if not repository_info or not repository_info.get('name'):
+            QMessageBox.warning(self, "Error", "Module repository information not found.")
             return
-        
-        # Create file URL
-        file_url = QUrl.fromLocalFile(os.path.abspath(doc_path))
-        
-        # Show the Git Building window and pass the file URL
-        self.parent.show_git_building(
-            self.selected_node.name,
-            None,
-            file_url.toString()
-        )
+
+        repo_dir = os.path.join("Downloaded Repositories", self.parent.repo_folder)
+        module_dir = os.path.join(repo_dir, repository_info.get('name'))
+        doc_folder = os.path.join(module_dir, "src", "doc")
+
+        if not os.path.exists(doc_folder):
+            QMessageBox.information(self, "Documentation Not Found",
+                                "No src/doc folder found for this module.")
+            return
+
+        # Find all markdown files
+        md_files = []
+        for filename in os.listdir(doc_folder):
+            if filename.lower().endswith('.md'):
+                md_files.append(filename)
+
+        if not md_files:
+            QMessageBox.information(self, "No Markdown Files",
+                                "No markdown files found in src/doc folder.")
+            return
+
+        # Show markdown selection widget
+        self.show_markdown_selection_widget(md_files, doc_folder)
+
+    def show_markdown_selection_widget(self, md_files, doc_folder):
+        """Show markdown file selection widget embedded in the main application"""
+        from MarkdownSelection_widget import MarkdownSelectionWidget
+
+        # Create the markdown selection widget
+        md_selection = MarkdownSelectionWidget(self.parent, md_files, doc_folder)
+
+        # Add to parent's central widget if it exists
+        if hasattr(self.parent, 'central_widget'):
+            # Remove any existing markdown selection widget
+            for i in range(self.parent.central_widget.count()):
+                if isinstance(self.parent.central_widget.widget(i), MarkdownSelectionWidget):
+                    existing_widget = self.parent.central_widget.widget(i)
+                    self.parent.central_widget.removeWidget(existing_widget)
+                    existing_widget.deleteLater()
+
+            # Add the new markdown selection widget
+            self.parent.central_widget.addWidget(md_selection)
+            self.parent.central_widget.setCurrentWidget(md_selection)
+        else:
+            # If no central widget, just show it as a separate window
+            md_selection.show()
 
     def check_module_documentation(self, module_data):
         """Check if a module has documentation file"""
@@ -1443,10 +1477,13 @@ class SystemView(QWidget):
     def open_project_folder(self):
         """Open the project folder in the system file explorer - WSL compatible (threaded)"""
         try:
-            # Stop existing thread if still running
+            # Wait for existing thread to finish if still running
             if self.folder_thread and self.folder_thread.isRunning():
-                print("Folder thread already running, ignoring duplicate click")
-                return
+                print("Folder thread already running, waiting for it to finish...")
+                self.folder_thread.wait(1000)  # Wait up to 1 second
+                if self.folder_thread.isRunning():
+                    print("Thread still running, ignoring click")
+                    return
 
             repo_dir = os.path.join(os.getcwd(), "Downloaded Repositories", self.parent.repo_folder)
 
@@ -1487,10 +1524,13 @@ class SystemView(QWidget):
                     url = 'https://' + url
 
                 try:
-                    # Stop existing thread if still running
+                    # Wait for existing thread to finish if still running
                     if self.browser_thread and self.browser_thread.isRunning():
-                        print("Browser thread already running, ignoring duplicate click")
-                        return
+                        print("Browser thread already running, waiting for it to finish...")
+                        self.browser_thread.wait(1000)  # Wait up to 1 second
+                        if self.browser_thread.isRunning():
+                            print("Thread still running, ignoring click")
+                            return
 
                     # Check for WSL
                     is_wsl = False
@@ -1611,7 +1651,7 @@ class SystemView(QWidget):
 
 
     def check_risk_assessment_file(self, module_data):
-        """Check if a risk assessment CSV file exists for the module in doc folder"""
+        """Check if a risk assessment file exists in the root doc folder"""
         if not module_data or not isinstance(module_data, dict):
             return None
 
@@ -1619,14 +1659,14 @@ class SystemView(QWidget):
         if not repository_info or not repository_info.get('name'):
             return None
 
-        # Get the repository folder
+        # Get the root repository folder
         repo_dir = os.path.join("Downloaded Repositories", self.parent.repo_folder)
         module_dir = os.path.join(repo_dir, repository_info.get('name'))
 
         if not os.path.exists(module_dir):
             return None
 
-        # Check for risk assessment CSV file with different capitalizations in doc folder
+        # Check for risk assessment file with different capitalizations and extensions in root/doc folder
         possible_filenames = [
             "RiskAssessment.csv",
             "riskassessment.csv",
@@ -1634,10 +1674,18 @@ class SystemView(QWidget):
             "Risk_Assessment.csv",
             "risk_assessment.csv",
             "risk-assessment.csv",
-            "Risk-Assessment.csv"
+            "Risk-Assessment.csv",
+            "RiskAssessment.txt",
+            "riskassessment.txt",
+            "RISKASSESSMENT.txt",
+            "Risk_Assessment.txt",
+            "risk_assessment.txt",
+            "risk-assessment.txt",
+            "Risk-Assessment.txt"
         ]
 
-        doc_folder = os.path.join(module_dir, "doc")
+        # Look in root doc folder (not module_dir/doc, but the parent doc folder)
+        doc_folder = os.path.join(repo_dir, "doc")
         for filename in possible_filenames:
             file_path = os.path.join(doc_folder, filename)
             if os.path.exists(file_path):
