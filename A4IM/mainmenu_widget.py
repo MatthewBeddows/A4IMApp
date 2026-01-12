@@ -157,29 +157,23 @@ class MainMenuWidget(QWidget):
             return False
 
     def check_module_documentation_path(self, module_dir):
-        """Check if a module has documentation file using recursive search"""
+        """Check if a module has markdown files in src/doc folder"""
         if not os.path.exists(module_dir):
             return False
-        
-        # Recursively search for index.html files
-        def find_index_html(directory):
-            """Recursively search for index.html files"""
-            found_files = []
-            try:
-                for root, dirs, files in os.walk(directory):
-                    for file in files:
-                        if file.lower() == 'index.html':
-                            full_path = os.path.join(root, file)
-                            found_files.append(full_path)
-            except Exception as e:
-                pass
-            return found_files
-        
-        # Search for all index.html files
-        found_files = find_index_html(module_dir)
-        
-        # Return True if any index.html files are found
-        return len(found_files) > 0
+
+        doc_folder = os.path.join(module_dir, "src", "doc")
+
+        if not os.path.exists(doc_folder):
+            return False
+
+        try:
+            for filename in os.listdir(doc_folder):
+                if filename.lower().endswith('.md'):
+                    return True
+        except:
+            pass
+
+        return False
 
     def get_architect_documentation_path(self):
         """Get the documentation path for the architect module"""
@@ -283,28 +277,48 @@ class MainMenuWidget(QWidget):
             return False
 
     def show_project_overview(self):
-        """Open the first documentation page directly in browser"""
-        doc_path = self.get_architect_documentation_path()
-        
-        if not doc_path:
-            print("No documentation found for architect module")
-            return
-        
+        """Open the first markdown file from src/doc folder"""
         try:
-            # Extract the first documentation link from the HTML file (like GitBuildingWindow does)
-            first_doc_path = self.get_first_documentation_link(doc_path)
-            
-            if first_doc_path:
-                print(f"Opening first documentation page: {first_doc_path}")
-                # Open the first actual documentation page using the working browser method
-                self.open_documentation_in_browser(first_doc_path)
-            else:
-                print("No documentation links found, opening main page")
-                # Fallback to opening the main page if no links found
-                self.open_documentation_in_browser(doc_path)
-                
+            repo_dir = os.path.join("Downloaded Repositories", self.parent.repo_folder)
+            repo_name = self.parent.initial_repo_url.split('/')[-1]
+            module_dir = os.path.join(repo_dir, repo_name)
+            doc_folder = os.path.join(module_dir, "src", "doc")
+
+            if not os.path.exists(doc_folder):
+                QMessageBox.information(self, "Documentation Not Found",
+                                    "No src/doc folder found for this project.")
+                return
+
+            # Find all markdown files
+            md_files = []
+            for filename in os.listdir(doc_folder):
+                if filename.lower().endswith('.md'):
+                    md_files.append(filename)
+
+            if not md_files:
+                QMessageBox.information(self, "No Markdown Files",
+                                    "No markdown files found in src/doc folder.")
+                return
+
+            # Open the first markdown file
+            first_md = sorted(md_files)[0]
+            file_path = os.path.join(doc_folder, first_md)
+
+            from MarkdownViewer_widget import MarkdownViewerWidget
+
+            md_viewer = MarkdownViewerWidget(None, file_path)
+            md_viewer.setWindowTitle(f"Project Overview - {first_md}")
+            md_viewer.resize(1000, 700)
+            md_viewer.show()
+
+            # Store reference to prevent garbage collection
+            if not hasattr(self, 'overview_viewers'):
+                self.overview_viewers = []
+            self.overview_viewers.append(md_viewer)
+
         except Exception as e:
             print(f"Error opening project overview: {e}")
+            QMessageBox.critical(self, "Error", f"Failed to open project overview: {str(e)}")
 
     def get_first_documentation_link(self, html_file_path):
         """Extract the first documentation link from HTML file (exact same logic as GitBuildingWindow)"""
@@ -389,6 +403,14 @@ class MainMenuWidget(QWidget):
         if not doc_path:
             QMessageBox.warning(self, "Error", "No documentation URL available.")
             return
+
+        # Wait for existing thread to finish if still running
+        if self.browser_thread and self.browser_thread.isRunning():
+            print("Browser thread already running, waiting for it to finish...")
+            self.browser_thread.wait(1000)  # Wait up to 1 second
+            if self.browser_thread.isRunning():
+                print("Thread still running, ignoring click")
+                return
 
         try:
             is_wsl = self.is_wsl()
