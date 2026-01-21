@@ -1504,6 +1504,13 @@ class SystemView(QWidget):
                 if not url.startswith(('http://', 'https://')):
                     url = 'https://' + url
 
+                branch = repository_info.get('branch')
+                if branch:
+                    if 'gitlab.com' in url:
+                        url = f"{url}/-/tree/{branch}"
+                    elif 'github.com' in url:
+                        url = f"{url}/tree/{branch}"
+
                 try:
                     # Wait for existing thread to finish if still running
                     if self.browser_thread and self.browser_thread.isRunning():

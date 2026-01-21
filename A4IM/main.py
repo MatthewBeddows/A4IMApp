@@ -72,7 +72,7 @@ class GitFileReaderApp(QMainWindow):
         """Start the loading process - call this after showing the window"""
         self.download_initial_repository()
 
-    def fetch_module_info_only(self, repo_url, verbose=False):
+    def fetch_module_info_only(self, repo_url, verbose=False, branch=None):
         """Fetch only ModuleInfo.txt from a Git repository (GitHub or GitLab)"""
         try:
             repo_url = repo_url.strip()
@@ -87,37 +87,50 @@ class GitFileReaderApp(QMainWindow):
                 parts = repo_url.replace('https://github.com/', '').replace('.git', '').split('/')
                 if len(parts) >= 2:
                     owner, repo = parts[0], parts[1]
-                    branches = ['main', 'master']
-                    filenames = ['ModuleInfo.txt', 'moduleInfo.txt', 'moduleinfo.txt', 'ModuleInfor.txt']
+                    branches = [branch] if branch else []
+                    branches.extend(['main', 'master'])
+                    filenames = ['ModuleInfo.txt', 'moduleInfo.txt']
 
-                    for branch in branches:
+                    for b in branches:
                         for filename in filenames:
-                            raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/lib/{filename}"
+                            raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{b}/lib/{filename}"
                             if verbose:
                                 print(f"Trying GitHub: {raw_url}")
                             response = requests.get(raw_url, timeout=10)
                             if response.status_code == 200:
                                 if verbose:
-                                    print(f"✓ Found {filename} in lib/ on {branch}")
+                                    print(f"✓ Found {filename} in lib/ on {b}")
                                 return response.text
 
             elif is_gitlab:
                 parts = repo_url.replace('https://gitlab.com/', '').replace('.git', '').split('/')
                 if len(parts) >= 2:
-                    owner, repo = parts[0], parts[1]
-                    branches = ['main', 'master']
-                    filenames = ['ModuleInfo.txt', 'moduleInfo.txt', 'moduleinfo.txt', 'ModuleInfor.txt']
+                    owner = parts[0]
+                    repo_path = '/'.join(parts[1:])
+                    branches = [branch] if branch else []
+                    branches.extend(['main', 'master'])
+                    filenames = ['ModuleInfo.txt', 'moduleInfo.txt']
 
-                    for branch in branches:
+                    for b in branches:
                         for filename in filenames:
-                            raw_url = f"https://gitlab.com/{owner}/{repo}/-/raw/{branch}/lib/{filename}"
+                            raw_url = f"https://gitlab.com/{owner}/{repo_path}/-/raw/{b}/lib/{filename}"
                             if verbose:
                                 print(f"Trying GitLab: {raw_url}")
-                            response = requests.get(raw_url, timeout=10)
-                            if response.status_code == 200:
+                            try:
+                                response = requests.get(raw_url, timeout=30)
                                 if verbose:
-                                    print(f"✓ Found {filename} in lib/ on {branch}")
-                                return response.text
+                                    print(f"  Response status: {response.status_code}")
+                                if response.status_code == 200:
+                                    if verbose:
+                                        print(f"✓ Found {filename} in lib/ on {b}")
+                                        print(f"  Content length: {len(response.text)} chars")
+                                    return response.text
+                            except requests.exceptions.Timeout:
+                                if verbose:
+                                    print(f"  Timeout for {raw_url}")
+                            except Exception as e:
+                                if verbose:
+                                    print(f"  Error: {e}")
 
             if verbose:
                 print(f"Could not find ModuleInfo.txt in repository")
@@ -181,16 +194,21 @@ class GitFileReaderApp(QMainWindow):
         QCoreApplication.processEvents()
 
         for idx, address in enumerate(module_addresses, 1):
-            repo_name = address.split('/')[-1].replace('.git', '')
+            # Extract branch from URL and get clean URL
+            clean_address, branch = self.extract_branch_from_url(address)
+            repo_name = clean_address.split('/')[-1].replace('.git', '')
 
             # Update loading screen
             self.loading_widget.update_status(f"Loading module {idx}/{total}: {repo_name}")
             self.loading_widget.set_progress(idx, total)
-            QCoreApplication.processEvents()  # Update UI
+            QCoreApplication.processEvents()
 
-            content = self.fetch_module_info_only(address, verbose=False)
+            content = self.fetch_module_info_only(clean_address, verbose=True, branch=branch)
 
             if content:
+                print(f"\n=== Content fetched from {clean_address} (branch: {branch}) ===")
+                print(content)
+                print(f"=== End of content ===\n")
                 # Save to metadata folder
                 module_info_path = os.path.join(metadata_dir, f"{repo_name}_ModuleInfo.txt")
                 with open(module_info_path, 'w') as f:
@@ -291,15 +309,32 @@ class GitFileReaderApp(QMainWindow):
         # Check if we're done
         self.check_if_all_complete()
 
+    def extract_branch_from_url(self, url):
+        """Extract branch name from GitLab/GitHub URL if present"""
+        if '/-/tree/' in url:
+            parts = url.split('/-/tree/')
+            if len(parts) > 1:
+                branch = parts[1].split('?')[0].strip()
+                clean_url = parts[0]
+                return clean_url, branch
+        elif '/tree/' in url:
+            parts = url.split('/tree/')
+            if len(parts) > 1:
+                branch = parts[1].split('?')[0].strip()
+                clean_url = parts[0]
+                return clean_url, branch
+        return url, None
+
     def parse_initial_module(self, module_info_path, repo_name):
         """Parse initial ModuleInfo.txt without downloading repos"""
         with open(module_info_path, 'r') as f:
             content = f.read()
-        
+
         module_name = None
         module_description = ""
         submodule_addresses = []
-        
+        module_branch = None
+
         lines = content.split('\n')
         i = 0
         while i < len(lines):
@@ -313,6 +348,13 @@ class GitFileReaderApp(QMainWindow):
                 while i < len(lines) and not lines[i].startswith('['):
                     module_description += ' ' + lines[i].strip()
                     i += 1
+            elif line.lower().startswith('[module branch]'):
+                parts = line.split(']', 1)
+                if len(parts) > 1:
+                    branch = parts[1].strip()
+                    if branch:
+                        module_branch = branch
+                i += 1
             elif line.lower().startswith('[module address]'):
                 parts = line.split(']', 1)
                 if len(parts) > 1:
@@ -336,6 +378,10 @@ class GitFileReaderApp(QMainWindow):
                 address = address.replace("gitlab.com/", "", address.count("gitlab.com") - 1)
             cleaned_addresses.append(address)
         
+        # Extract branch from initial repo URL
+        clean_initial_url, url_branch = self.extract_branch_from_url(self.initial_repo_url)
+        branch_to_use = url_branch if url_branch else module_branch
+
         # Initialize modules dictionary
         self.modules = OrderedDict()
         self.modules[module_name] = {
@@ -344,10 +390,11 @@ class GitFileReaderApp(QMainWindow):
             'submodule_addresses': cleaned_addresses,
             'repository': {
                 'name': repo_name,
-                'address': self.initial_repo_url,
+                'address': clean_initial_url,
+                'branch': branch_to_use,
                 'docs_path': None
             },
-            'is_downloaded': False  # Track download state
+            'is_downloaded': False
         }
         self.module_order.append(module_name)
         
@@ -499,10 +546,14 @@ class GitFileReaderApp(QMainWindow):
             parent_module['submodules'] = OrderedDict()
         
         for address in addresses:
-            repo_name = address.split('/')[-1].replace('.git', '')
+            # Extract branch from URL and get clean address
+            clean_address, branch = self.extract_branch_from_url(address)
+            repo_name = clean_address.split('/')[-1].replace('.git', '')
             module_info_path = os.path.join(metadata_dir, f"{repo_name}_ModuleInfo.txt")
-            
+
+            print(f"Looking for: {module_info_path}")
             if os.path.exists(module_info_path):
+                print(f"  Found! Parsing {repo_name}")
                 with open(module_info_path, 'r') as f:
                     content = f.read()
                 
@@ -510,7 +561,8 @@ class GitFileReaderApp(QMainWindow):
                 module_name = None
                 module_description = ""
                 module_addresses = []
-                
+                module_branch = None
+
                 lines = content.split('\n')
                 i = 0
                 while i < len(lines):
@@ -524,6 +576,13 @@ class GitFileReaderApp(QMainWindow):
                         while i < len(lines) and not lines[i].startswith('['):
                             module_description += ' ' + lines[i].strip()
                             i += 1
+                    elif line.lower().startswith('[module branch]'):
+                        parts = line.split(']', 1)
+                        if len(parts) > 1:
+                            branch = parts[1].strip()
+                            if branch:
+                                module_branch = branch
+                        i += 1
                     elif line.lower().startswith('[module address]'):
                         parts = line.split(']', 1)
                         if len(parts) > 1:
@@ -547,6 +606,10 @@ class GitFileReaderApp(QMainWindow):
                         addr = addr.replace("gitlab.com/", "", addr.count("gitlab.com") - 1)
                     cleaned_addresses.append(addr)
                 
+                # Extract branch from URL
+                clean_addr, url_branch = self.extract_branch_from_url(address)
+                branch_to_use = url_branch if url_branch else module_branch
+
                 # Add module without downloading
                 parent_module['submodules'][module_name] = {
                     'description': module_description.strip(),
@@ -554,7 +617,8 @@ class GitFileReaderApp(QMainWindow):
                     'submodule_addresses': cleaned_addresses,
                     'repository': {
                         'name': repo_name,
-                        'address': address,
+                        'address': clean_addr,
+                        'branch': branch_to_use,
                         'docs_path': None
                     },
                     'is_downloaded': False

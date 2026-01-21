@@ -12,28 +12,33 @@ import os
 
 class DownloadWorker(QThread):
     """Background thread for downloading repositories"""
-    progress = pyqtSignal(str)  # Emits status messages
-    finished = pyqtSignal(bool, str)  # Emits (success, message)
-    
-    def __init__(self, repo_url, local_path):
+    progress = pyqtSignal(str)
+    finished = pyqtSignal(bool, str)
+
+    def __init__(self, repo_url, local_path, branch=None):
         super().__init__()
         self.repo_url = repo_url
         self.local_path = local_path
+        self.branch = branch
         self._is_running = True
-    
+
     def stop(self):
         """Stop the download thread"""
         self._is_running = False
-    
+
     def run(self):
         try:
             if not self._is_running:
                 self.finished.emit(False, "Download cancelled")
                 return
-                
-            self.progress.emit(f"Cloning repository...")
-            pygit2.clone_repository(self.repo_url, self.local_path)
-            
+
+            if self.branch:
+                self.progress.emit(f"Cloning repository (branch: {self.branch})...")
+                pygit2.clone_repository(self.repo_url, self.local_path, checkout_branch=self.branch)
+            else:
+                self.progress.emit(f"Cloning repository...")
+                pygit2.clone_repository(self.repo_url, self.local_path)
+
             if self._is_running:
                 self.finished.emit(True, "Download complete")
             else:
@@ -89,25 +94,26 @@ class DownloadManager:
     def download_single_module(self, node):
         """
         Clone the repository for a single module
-        
+
         Args:
             node: NodeItem representing the module to download
         """
         repo_info = node.data.get('repository', {})
         if not repo_info or not repo_info.get('address'):
             return
-        
+
         repo_url = repo_info['address']
+        branch = repo_info.get('branch')
         repo_name = repo_url.split('/')[-1].replace('.git', '')
         repo_dir = os.path.join("Downloaded Repositories", self.system_view.parent.repo_folder)
         local_path = os.path.join(repo_dir, repo_name)
-        
+
         # Clean up any existing worker
         if self.download_worker:
             self.cleanup_download_worker()
-        
+
         # Create and start download worker
-        self.download_worker = DownloadWorker(repo_url, local_path)
+        self.download_worker = DownloadWorker(repo_url, local_path, branch)
         self.download_worker.progress.connect(lambda msg: print(msg))
         self.download_worker.finished.connect(
             lambda success, msg: self.on_download_finished(node, repo_name, success, msg)
@@ -217,16 +223,17 @@ class DownloadManager:
             return
         
         repo_url = repo_info['address']
+        branch = repo_info.get('branch')
         repo_name = repo_url.split('/')[-1].replace('.git', '')
         repo_dir = os.path.join("Downloaded Repositories", self.system_view.parent.repo_folder)
         local_path = os.path.join(repo_dir, repo_name)
-        
+
         # Clean up any existing worker
         if self.download_worker:
             self.cleanup_download_worker()
-        
+
         # Create and start download worker
-        self.download_worker = DownloadWorker(repo_url, local_path)
+        self.download_worker = DownloadWorker(repo_url, local_path, branch)
         self.download_worker.progress.connect(lambda msg: print(msg))
         self.download_worker.finished.connect(
             lambda success, msg: self.on_queue_download_finished(current_node, repo_name, success, msg)
