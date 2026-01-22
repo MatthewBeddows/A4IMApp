@@ -100,13 +100,23 @@ class DownloadManager:
         """
         repo_info = node.data.get('repository', {})
         if not repo_info or not repo_info.get('address'):
+            print(f"No repo_info or address for node: {node.data}")
             return
 
-        repo_url = repo_info['address']
+        repo_url = repo_info['address'].rstrip('/')
         branch = repo_info.get('branch')
         repo_name = repo_url.split('/')[-1].replace('.git', '')
         repo_dir = os.path.join("Downloaded Repositories", self.system_view.parent.repo_folder)
         local_path = os.path.join(repo_dir, repo_name)
+
+        print(f"=== Download Single Module Debug ===")
+        print(f"  repo_info: {repo_info}")
+        print(f"  repo_url: {repo_url}")
+        print(f"  branch: {branch}")
+        print(f"  repo_name: {repo_name}")
+        print(f"  repo_dir: {repo_dir}")
+        print(f"  local_path: {local_path}")
+        print(f"====================================")
 
         # Clean up any existing worker
         if self.download_worker:
@@ -222,11 +232,20 @@ class DownloadManager:
             self.download_next_in_queue()
             return
         
-        repo_url = repo_info['address']
+        repo_url = repo_info['address'].rstrip('/')
         branch = repo_info.get('branch')
         repo_name = repo_url.split('/')[-1].replace('.git', '')
         repo_dir = os.path.join("Downloaded Repositories", self.system_view.parent.repo_folder)
         local_path = os.path.join(repo_dir, repo_name)
+
+        print(f"=== Download Queue Debug ===")
+        print(f"  repo_info: {repo_info}")
+        print(f"  repo_url: {repo_url}")
+        print(f"  branch: {branch}")
+        print(f"  repo_name: {repo_name}")
+        print(f"  repo_dir: {repo_dir}")
+        print(f"  local_path: {local_path}")
+        print(f"============================")
 
         # Clean up any existing worker
         if self.download_worker:
