@@ -148,7 +148,7 @@ class GitFileReaderApp(QMainWindow):
         """Only fetch ModuleInfo.txt - no full clone"""
         import datetime
 
-        repo_name = self.initial_repo_url.split('/')[-1].replace('.git', '')
+        repo_name = self.initial_repo_url.rstrip('/').split('/')[-1].replace('.git', '')
         download_dir = os.path.join(os.getcwd(), "Downloaded Repositories")
         repo_dir = os.path.join(download_dir, self.repo_folder)
         metadata_dir = os.path.join(repo_dir, ".metadata")
@@ -196,6 +196,7 @@ class GitFileReaderApp(QMainWindow):
         for idx, address in enumerate(module_addresses, 1):
             # Extract branch from URL and get clean URL
             clean_address, branch = self.extract_branch_from_url(address)
+            clean_address = clean_address.rstrip('/')
             repo_name = clean_address.split('/')[-1].replace('.git', '')
 
             # Update loading screen
@@ -380,6 +381,7 @@ class GitFileReaderApp(QMainWindow):
         
         # Extract branch from initial repo URL
         clean_initial_url, url_branch = self.extract_branch_from_url(self.initial_repo_url)
+        clean_initial_url = clean_initial_url.rstrip('/')
         branch_to_use = url_branch if url_branch else module_branch
 
         # Initialize modules dictionary
@@ -447,7 +449,7 @@ class GitFileReaderApp(QMainWindow):
             parent_module['submodules'] = OrderedDict()
         
         for address in addresses:
-            repo_name = address.split('/')[-1]
+            repo_name = address.rstrip('/').split('/')[-1]
             repo_path = os.path.join(repo_dir, repo_name)
 
             # Find ModuleInfo.txt in lib folder
@@ -548,6 +550,7 @@ class GitFileReaderApp(QMainWindow):
         for address in addresses:
             # Extract branch from URL and get clean address
             clean_address, branch = self.extract_branch_from_url(address)
+            clean_address = clean_address.rstrip('/')
             repo_name = clean_address.split('/')[-1].replace('.git', '')
             module_info_path = os.path.join(metadata_dir, f"{repo_name}_ModuleInfo.txt")
 
@@ -608,6 +611,7 @@ class GitFileReaderApp(QMainWindow):
                 
                 # Extract branch from URL
                 clean_addr, url_branch = self.extract_branch_from_url(address)
+                clean_addr = clean_addr.rstrip('/')
                 branch_to_use = url_branch if url_branch else module_branch
 
                 # Add module without downloading
