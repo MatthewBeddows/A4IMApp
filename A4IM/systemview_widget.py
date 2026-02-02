@@ -492,22 +492,41 @@ class SystemView(QWidget):
         right_layout.addWidget(self.module_details)
 
         # Buttons at the bottom
+        # Build Instructions section
+        self.build_instructions_label = QLabel("Build Instructions")
+        self.build_instructions_label.setFont(QFont('Arial', 12, QFont.Bold))
+        self.build_instructions_label.setStyleSheet("color: #465775; margin-top: 10px;")
+        self.build_instructions_label.hide()
+        right_layout.addWidget(self.build_instructions_label)
+
         self.construct_button = self.create_button("Construct")
         self.construct_button.clicked.connect(self.construct_module)
         self.construct_button.hide()
         right_layout.addWidget(self.construct_button)
 
-        self.risk_button = self.create_button("Risk Assessment")
-        self.risk_button.clicked.connect(self.open_risk_assessment)
-        self.risk_button.hide()  # Initially hide the button
-        right_layout.addWidget(self.risk_button)
-
+        # Other Documents section
+        self.other_documents_label = QLabel("Other Documents")
+        self.other_documents_label.setFont(QFont('Arial', 12, QFont.Bold))
+        self.other_documents_label.setStyleSheet("color: #465775; margin-top: 10px;")
+        self.other_documents_label.hide()
+        right_layout.addWidget(self.other_documents_label)
 
         self.view_bom_button = self.create_button("View Module BOM")
         self.view_bom_button.clicked.connect(self.view_module_bom)
+        self.view_bom_button.hide()
         right_layout.addWidget(self.view_bom_button)
 
-        # Add these new CSV buttons
+        self.risk_button = self.create_button("Risk Assessment")
+        self.risk_button.clicked.connect(self.open_risk_assessment)
+        self.risk_button.hide()
+        right_layout.addWidget(self.risk_button)
+
+        self.failure_mode_button = self.create_button("Failure Mode")
+        self.failure_mode_button.clicked.connect(self.open_failure_mode)
+        self.failure_mode_button.hide()
+        right_layout.addWidget(self.failure_mode_button)
+
+        # Additional CSV buttons
         self.inventory_button = self.create_button("View Inventory")
         self.inventory_button.clicked.connect(self.view_inventory_csv)
         self.inventory_button.hide()
@@ -1097,24 +1116,44 @@ class SystemView(QWidget):
         self.completion_checkbox.setChecked(node.completed)
         self.completion_checkbox.blockSignals(False)
 
-        # Check if module has docs
+        # Check if module has docs (Build Instructions section)
         doc_file_path = self.check_module_documentation(data)
-        if doc_file_path:
+        has_build_instructions = doc_file_path is not None
+        if has_build_instructions:
+            self.build_instructions_label.show()
             self.construct_button.show()
         else:
+            self.build_instructions_label.hide()
             self.construct_button.hide()
 
+        # Check for Other Documents (BOM, Risk Assessment, Failure Mode)
+        has_bom = self.has_csv_in_children(node, self.check_for_bom_file)
+        has_risk = self.has_csv_in_children(node, self.check_risk_assessment_file)
+        has_failure_mode = self.has_csv_in_children(node, self.check_for_failure_mode_csv)
+
+        # Show/hide Other Documents heading based on any document being available
+        if has_bom or has_risk or has_failure_mode:
+            self.other_documents_label.show()
+        else:
+            self.other_documents_label.hide()
+
+        # Check for BOM files (current + children)
+        if has_bom:
+            self.view_bom_button.show()
+        else:
+            self.view_bom_button.hide()
+
         # Check if risk assessment exists (current + children)
-        if self.has_csv_in_children(node, self.check_risk_assessment_file):
+        if has_risk:
             self.risk_button.show()
         else:
             self.risk_button.hide()
 
-        # Check for BOM files (current + children)
-        if self.has_csv_in_children(node, self.check_for_bom_file):
-            self.view_bom_button.show()
+        # Check for failure mode files (current + children)
+        if has_failure_mode:
+            self.failure_mode_button.show()
         else:
-            self.view_bom_button.hide()
+            self.failure_mode_button.hide()
 
         # Check for inventory files (current + children)
         if self.has_csv_in_children(node, self.check_for_inventory_csv):
@@ -1276,25 +1315,33 @@ class SystemView(QWidget):
                     # Multiple children have BOMs - create aggregated view directly
                     self.create_and_open_aggregated_csv(bom_files, "BOM")
 
-    def open_csv_in_viewer(self, csv_path):
-        """Open a CSV file in the CSV viewer"""
+    def open_csv_in_viewer(self, csv_path, viewer_type="bom"):
+        """Open a CSV file in the CSV viewer
+
+        Args:
+            csv_path: Path to the CSV file
+            viewer_type: Type of viewer to use ('bom' for BOM with checkboxes, 'generic' for basic viewer)
+        """
         try:
-            # Import the CSV viewer class
-            from CSVViewer_widget import CSVViewerWidget
-            
-            # Create the CSV viewer
-            csv_viewer = CSVViewerWidget(self.parent, csv_path)
-            
+            # Import the appropriate CSV viewer class
+            from CSVViewer_widget import CSVViewerWidget, BOMViewerWidget
+
+            # Create the appropriate CSV viewer based on type
+            if viewer_type == "bom":
+                csv_viewer = BOMViewerWidget(self.parent, csv_path)
+            else:
+                csv_viewer = CSVViewerWidget(self.parent, csv_path)
+
             # Add to parent's central widget if it exists
             if hasattr(self.parent, 'central_widget'):
-                # First, check if the CSV viewer is already in the central widget
+                # First, check if a CSV viewer is already in the central widget
                 for i in range(self.parent.central_widget.count()):
-                    if isinstance(self.parent.central_widget.widget(i), CSVViewerWidget):
+                    widget = self.parent.central_widget.widget(i)
+                    if isinstance(widget, (CSVViewerWidget, BOMViewerWidget)):
                         # Remove the existing CSV viewer
-                        existing_viewer = self.parent.central_widget.widget(i)
-                        self.parent.central_widget.removeWidget(existing_viewer)
-                        existing_viewer.deleteLater()
-                        
+                        self.parent.central_widget.removeWidget(widget)
+                        widget.deleteLater()
+
                 # Add the new CSV viewer
                 self.parent.central_widget.addWidget(csv_viewer)
                 self.parent.central_widget.setCurrentWidget(csv_viewer)
@@ -1672,12 +1719,19 @@ class SystemView(QWidget):
             "Risk-Assessment.txt"
         ]
 
-        # Look in root doc folder (not module_dir/doc, but the parent doc folder)
-        doc_folder = os.path.join(repo_dir, "doc")
-        for filename in possible_filenames:
-            file_path = os.path.join(doc_folder, filename)
-            if os.path.exists(file_path):
-                return file_path
+        # Look in doc/docs folders - check module level FIRST, then project root
+        doc_folders = [
+            os.path.join(module_dir, "docs"),
+            os.path.join(module_dir, "doc"),
+            os.path.join(repo_dir, "docs"),
+            os.path.join(repo_dir, "doc")
+        ]
+
+        for doc_folder in doc_folders:
+            for filename in possible_filenames:
+                file_path = os.path.join(doc_folder, filename)
+                if os.path.exists(file_path):
+                    return file_path
 
         return None
 
@@ -1702,8 +1756,8 @@ class SystemView(QWidget):
         if current_node_risk:
             # Current node has its own risk assessment
             if len(risk_files) == 1:
-                # Only current node has risk assessment
-                self.open_csv_in_viewer(risk_files[0]['path'])
+                # Only current node has risk assessment - open with generic viewer
+                self.open_csv_in_viewer(risk_files[0]['path'], viewer_type="generic")
             else:
                 # Current node + children have risk assessments - show choice dialog
                 self.show_csv_aggregation_dialog(risk_files, "Risk Assessment")
@@ -1711,21 +1765,114 @@ class SystemView(QWidget):
             # Current node doesn't have its own risk assessment, but children do
             # Show informational dialog first
             reply = QMessageBox.question(
-                self, "Risk Assessment", 
+                self, "Risk Assessment",
                 f"This module does not have its own risk assessment file.\n\n"
                 f"However, {len(risk_files)} risk assessment file(s) were found in sub-modules.\n\n"
                 f"Would you like to view the aggregated risk assessments from sub-modules?",
                 QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
             )
-            
+
             if reply == QMessageBox.Yes:
                 if len(risk_files) == 1:
                     # Only one child has risk assessment - open it directly
-                    self.open_csv_in_viewer(risk_files[0]['path'])
+                    self.open_csv_in_viewer(risk_files[0]['path'], viewer_type="generic")
                 else:
                     # Multiple children have risk assessments - create aggregated view directly
                     self.create_and_open_aggregated_csv(risk_files, "Risk Assessment")
 
+    def check_for_failure_mode_csv(self, module_data):
+        """Check if a failure mode CSV file exists in doc/docs folder"""
+        if not module_data or not isinstance(module_data, dict):
+            return None
+
+        repository_info = module_data.get('repository', {})
+        if not repository_info or not repository_info.get('name'):
+            return None
+
+        # Get the root repository folder
+        repo_dir = os.path.join("Downloaded Repositories", self.parent.repo_folder)
+        module_dir = os.path.join(repo_dir, repository_info.get('name'))
+
+        if not os.path.exists(module_dir):
+            return None
+
+        # Check for failure mode file with different capitalizations
+        possible_filenames = [
+            "failuremode.csv",
+            "FailureMode.csv",
+            "FAILUREMODE.csv",
+            "Failure_Mode.csv",
+            "failure_mode.csv",
+            "failure-mode.csv",
+            "Failure-Mode.csv",
+            "FailureModes.csv",
+            "failuremodes.csv",
+            "Failure_Modes.csv",
+            "failure_modes.csv",
+            "FMEA.csv",
+            "fmea.csv"
+        ]
+
+        # Look in doc/docs folders - check module level FIRST, then project root
+        doc_folders = [
+            os.path.join(module_dir, "docs"),
+            os.path.join(module_dir, "doc"),
+            os.path.join(repo_dir, "docs"),
+            os.path.join(repo_dir, "doc")
+        ]
+
+        for doc_folder in doc_folders:
+            for filename in possible_filenames:
+                file_path = os.path.join(doc_folder, filename)
+                if os.path.exists(file_path):
+                    print(f"Found failure mode file: {file_path}")
+                    return file_path
+
+        return None
+
+    def open_failure_mode(self):
+        """Open the failure mode file for the selected module"""
+        if not self.selected_node:
+            QMessageBox.warning(self, "Error", "No module selected.")
+            return
+
+        # First check if current node has its own failure mode file
+        current_node_failure = self.check_for_failure_mode_csv(self.selected_node.data)
+
+        # Then find all failure mode files in current node and children
+        failure_files = self.find_csv_in_children(self.selected_node, self.check_for_failure_mode_csv)
+
+        if not failure_files:
+            QMessageBox.information(self, "Failure Mode",
+                                "No failure mode file found for this module or its sub-modules.")
+            return
+
+        # Check if current node has its own file
+        if current_node_failure:
+            # Current node has its own failure mode file
+            if len(failure_files) == 1:
+                # Only current node has failure mode - open with generic viewer
+                self.open_csv_in_viewer(failure_files[0]['path'], viewer_type="generic")
+            else:
+                # Current node + children have failure mode files - show choice dialog
+                self.show_csv_aggregation_dialog(failure_files, "Failure Mode")
+        else:
+            # Current node doesn't have its own failure mode file, but children do
+            reply = QMessageBox.question(
+                self, "Failure Mode",
+                f"This module does not have its own failure mode file.\n\n"
+                f"However, {len(failure_files)} failure mode file(s) were found in sub-modules.\n\n"
+                f"Would you like to view the aggregated failure modes from sub-modules?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
+            )
+
+            if reply == QMessageBox.Yes:
+                if len(failure_files) == 1:
+                    # Only one child has failure mode - open it directly
+                    self.open_csv_in_viewer(failure_files[0]['path'], viewer_type="generic")
+                else:
+                    # Multiple children have failure modes - create aggregated view directly
+                    self.create_and_open_aggregated_csv(failure_files, "Failure Mode")
 
     def find_csv_in_children(self, node, csv_checker_method):
         """Recursively find CSV files in child nodes using the specified checker method"""
@@ -1816,11 +1963,13 @@ class SystemView(QWidget):
         
         if dialog.exec_() == QDialog.Accepted:
             choice = self.csv_choice_group.checkedId()
+            # Determine viewer type based on CSV type
+            viewer_type = "bom" if csv_type == "BOM" else "generic"
             if choice == 0:
                 # Open current node only
                 current_node_csv = next((f for f in csv_files if f['node'] == self.selected_node), None)
                 if current_node_csv:
-                    self.open_csv_in_viewer(current_node_csv['path'])
+                    self.open_csv_in_viewer(current_node_csv['path'], viewer_type=viewer_type)
             elif choice == 1:
                 # Create aggregated CSV
                 self.create_and_open_aggregated_csv(csv_files, csv_type)
@@ -1861,9 +2010,10 @@ class SystemView(QWidget):
             
             # Save combined data
             combined_df.to_csv(temp_path, index=False)
-            
-            # Open in CSV viewer
-            self.open_csv_in_viewer(temp_path)
+
+            # Open in CSV viewer - use BOM viewer for BOM, generic for others
+            viewer_type = "bom" if csv_type == "BOM" else "generic"
+            self.open_csv_in_viewer(temp_path, viewer_type=viewer_type)
             
             # Store temp file path for cleanup later
             if not hasattr(self, 'temp_csv_files'):

@@ -764,10 +764,13 @@ class GitBuildingWindow(QWidget):
             QMessageBox.warning(self, "Error", "No documentation URL available.")
             return
 
-        # Stop existing thread if still running
+        # Wait for existing thread to finish if still running
         if self.browser_thread and self.browser_thread.isRunning():
-            self.log("Browser thread already running, ignoring duplicate click")
-            return
+            self.log("Browser thread already running, waiting for it to finish...")
+            self.browser_thread.wait(1000)  # Wait up to 1 second
+            if self.browser_thread.isRunning():
+                self.log("Thread still running, ignoring click")
+                return
 
         try:
             is_wsl = self.is_wsl()
@@ -807,10 +810,13 @@ class GitBuildingWindow(QWidget):
             QMessageBox.warning(self, "Error", "No content loaded.")
             return
 
-        # Stop existing thread if still running
+        # Wait for existing thread to finish if still running
         if self.folder_thread and self.folder_thread.isRunning():
-            self.log("Folder thread already running, ignoring duplicate click")
-            return
+            self.log("Folder thread already running, waiting for it to finish...")
+            self.folder_thread.wait(1000)  # Wait up to 1 second
+            if self.folder_thread.isRunning():
+                self.log("Thread still running, ignoring click")
+                return
 
         try:
             # Get the orshards directory path
