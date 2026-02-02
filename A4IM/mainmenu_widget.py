@@ -94,6 +94,7 @@ class MainMenuWidget(QWidget):
         
         buttons.extend([
             ("System View", self.parent.show_system_view),
+            ("Refresh Hierarchy", self.parent.refresh_hierarchy),
             ("Exit", self.parent.close)
         ])
 

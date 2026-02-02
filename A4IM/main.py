@@ -1,5 +1,7 @@
 import sys
 import os
+import json
+import datetime
 import requests
 
 
@@ -71,6 +73,54 @@ class GitFileReaderApp(QMainWindow):
     def start_loading(self):
         """Start the loading process - call this after showing the window"""
         self.download_initial_repository()
+
+    def get_cache_file_path(self):
+        """Get path to hierarchy cache file"""
+        return os.path.join("Downloaded Repositories", self.repo_folder, "hierarchy_cache.json")
+
+    def save_hierarchy_cache(self):
+        """Save modules hierarchy to cache file"""
+        cache_path = self.get_cache_file_path()
+        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+
+        cache_data = {
+            "version": 1,
+            "cached_at": datetime.datetime.now().isoformat(),
+            "initial_repo_url": self.initial_repo_url,
+            "modules": self.modules
+        }
+
+        with open(cache_path, 'w') as f:
+            json.dump(cache_data, f, indent=2)
+
+        print(f"Saved hierarchy cache to {cache_path}")
+
+    def load_hierarchy_cache(self):
+        """Load modules hierarchy from cache file. Returns True if loaded successfully."""
+        cache_path = self.get_cache_file_path()
+
+        if not os.path.exists(cache_path):
+            return False
+
+        try:
+            with open(cache_path, 'r') as f:
+                cache_data = json.load(f, object_pairs_hook=OrderedDict)
+
+            # Validate cache
+            if cache_data.get("version") != 1:
+                return False
+
+            self.modules = cache_data.get("modules", OrderedDict())
+
+            # Rebuild module_order from top-level keys
+            self.module_order = list(self.modules.keys())
+
+            print(f"Loaded hierarchy from cache ({cache_data.get('cached_at', 'unknown')})")
+            return True
+
+        except (json.JSONDecodeError, KeyError) as e:
+            print(f"Failed to load cache: {e}")
+            return False
 
     def fetch_module_info_only(self, repo_url, verbose=False, branch=None):
         """Fetch only ModuleInfo.txt from a Git repository (GitHub or GitLab)"""
@@ -146,7 +196,18 @@ class GitFileReaderApp(QMainWindow):
 
     def download_initial_repository(self):
         """Only fetch ModuleInfo.txt - no full clone"""
-        import datetime
+        # Check for cached hierarchy first
+        if self.load_hierarchy_cache():
+            self.loading_widget.update_message("Loading from cache...")
+            self.loading_widget.update_status("Hierarchy loaded from local cache")
+            QCoreApplication.processEvents()
+
+            # Skip to main menu
+            print("Loaded from cache - skipping online fetch")
+            self.loading_complete = True
+            self.main_menu.show()
+            self.show_main_menu()
+            return
 
         repo_name = self.initial_repo_url.rstrip('/').split('/')[-1].replace('.git', '')
         download_dir = os.path.join(os.getcwd(), "Downloaded Repositories")
@@ -251,6 +312,24 @@ class GitFileReaderApp(QMainWindow):
         self.git_building.load_url(url)
         self.central_widget.setCurrentWidget(self.git_building)
 
+    def refresh_hierarchy(self):
+        """Delete cache and re-fetch hierarchy from online"""
+        cache_path = self.get_cache_file_path()
+        if os.path.exists(cache_path):
+            os.remove(cache_path)
+            print(f"Deleted hierarchy cache: {cache_path}")
+
+        # Clear current modules
+        self.modules = {}
+        self.module_order = []
+
+        # Show loading screen
+        self.central_widget.setCurrentWidget(self.loading_widget)
+        self.loading_widget.update_message("Refreshing hierarchy...")
+        self.loading_complete = False
+
+        # Re-fetch from online
+        self.download_initial_repository()
 
     def add_timestamp_to_module_info(self, repo_path):
         """Add a deployment timestamp to the ModuleInfo.txt file in lib folder"""
@@ -407,7 +486,10 @@ class GitFileReaderApp(QMainWindow):
             print(f"Fetching info for {len(cleaned_addresses)} submodules...")
             self.fetch_submodule_infos(cleaned_addresses, module_name)
             self.parse_submodule_infos([module_name], cleaned_addresses)
-        
+
+        # Save hierarchy to cache for future runs
+        self.save_hierarchy_cache()
+
         # Load complete - show main menu
         print("All module info loaded! Loading main menu...")
         self.loading_complete = True
