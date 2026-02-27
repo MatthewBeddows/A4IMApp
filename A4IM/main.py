@@ -273,8 +273,10 @@ class GitFileReaderApp(QMainWindow):
                 print(f"=== End of content ===\n")
                 # Save to metadata folder
                 module_info_path = os.path.join(metadata_dir, f"{repo_name}_ModuleInfo.txt")
+                timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 with open(module_info_path, 'w') as f:
                     f.write(content)
+                    f.write(f"\n[Deployed] {timestamp}")
             else:
                 print(f"Warning: Could not fetch module info for {repo_name}")
 

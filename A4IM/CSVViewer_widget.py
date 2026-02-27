@@ -332,9 +332,11 @@ class CSVViewerWidget(QWidget):
         try:
             with open(file_path, 'r', newline='') as f:
                 sample = f.read(4096)
-                sniffer = csv.Sniffer()
-                dialect = sniffer.sniff(sample)
+            try:
+                dialect = csv.Sniffer().sniff(sample)
                 delimiter = dialect.delimiter
+            except csv.Error:
+                delimiter = ','
 
             self.df = pd.read_csv(file_path, delimiter=delimiter)
 
@@ -653,3 +655,247 @@ class BOMViewerWidget(CSVViewerWidget):
                 return
 
         super().close_viewer()
+
+
+class RiskAssessmentPandasModel(PandasModel):
+    """Model for Risk Assessment display.
+    Rows with _mitigated=True (set by merge_mitigation_rows) are highlighted green.
+    The _mitigated column is hidden from the view.
+    """
+
+    def __init__(self, data):
+        super().__init__(data)
+        self._has_mitigated = '_mitigated' in data.columns
+        # Visible columns exclude the internal _mitigated flag
+        self._visible_cols = [c for c in data.columns if c != '_mitigated']
+        # Pre-compute actual DataFrame column indices for visible columns
+        self._visible_idx = [data.columns.get_loc(c) for c in self._visible_cols]
+
+    def columnCount(self, parent=QModelIndex()):
+        return len(self._visible_cols)
+
+    def headerData(self, section, orientation, role=Qt.DisplayRole):
+        if role == Qt.DisplayRole:
+            if orientation == Qt.Horizontal:
+                return str(self._visible_cols[section])
+            else:
+                return str(section + 1)
+        return QVariant()
+
+    def data(self, index, role=Qt.DisplayRole):
+        if not index.isValid():
+            return QVariant()
+
+        # Map display column → actual DataFrame column index
+        df_col = self._visible_idx[index.column()]
+
+        if role == Qt.BackgroundRole:
+            if self._has_mitigated and bool(self._data.iloc[index.row()]['_mitigated']):
+                return QColor(200, 240, 200)
+            if index.row() % 2 == 0:
+                return QColor(240, 240, 240)
+            return QVariant()
+
+        if role == Qt.DisplayRole or role == Qt.EditRole:
+            value = self._data.iloc[index.row(), df_col]
+            return "" if pd.isna(value) else str(value)
+
+        if role == Qt.TextAlignmentRole:
+            value = self._data.iloc[index.row(), df_col]
+            if isinstance(value, (int, float)):
+                return Qt.AlignRight | Qt.AlignVCenter
+            return Qt.AlignLeft | Qt.AlignVCenter
+
+        if role == Qt.ForegroundRole:
+            if self.is_url(index.row(), df_col):
+                return QColor('blue')
+
+        if role == Qt.FontRole:
+            if self.is_url(index.row(), df_col):
+                font = QFont()
+                font.setUnderline(True)
+                return font
+
+        if role == Qt.ToolTipRole:
+            if self.is_url(index.row(), df_col):
+                value = self._data.iloc[index.row(), df_col]
+                return f"Click to open: {value}"
+            return None
+
+        return QVariant()
+
+
+class RiskAssessmentViewerWidget(CSVViewerWidget):
+    """Risk Assessment CSV viewer with green highlighting and word wrap"""
+
+    def __init__(self, parent=None, csv_path=None):
+        super().__init__(parent, csv_path)
+
+    def get_model_class(self):
+        """Use Risk Assessment model with green highlighting"""
+        return RiskAssessmentPandasModel
+
+    def load_csv(self, file_path):
+        """Load CSV, merge mitigation rows if needed, enable word wrap"""
+        try:
+            with open(file_path, 'r', newline='') as f:
+                sample = f.read(4096)
+            try:
+                dialect = csv.Sniffer().sniff(sample)
+                delimiter = dialect.delimiter
+            except csv.Error:
+                delimiter = ','
+
+            df = pd.read_csv(file_path, delimiter=delimiter)
+
+            # Merge mitigation rows into columns if applicable
+            df = self.merge_mitigation_rows(df)
+
+            self.df = df
+
+            model_class = self.get_model_class()
+            model = model_class(self.df)
+            self.on_model_created(model)
+            self.table_view.setModel(model)
+
+            # Enable word wrap and auto-fit rows
+            self.table_view.setWordWrap(True)
+            self.table_view.setTextElideMode(Qt.ElideNone)
+            self.table_view.verticalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+            self.table_view.verticalHeader().setMinimumSectionSize(30)
+
+            # Auto-fit columns to content, then allow interactive resize
+            self.table_view.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+            self.table_view.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+
+            filename = os.path.basename(file_path)
+            self.header_label.setText(f"File: {filename} - {len(self.df)} rows, {len(self.df.columns)} columns")
+            self.setWindowTitle(f"Risk Assessment - {filename}")
+            self.csv_path = file_path
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to load risk assessment file: {str(e)}")
+
+    def merge_mitigation_rows(self, df):
+        """Merge mitigation rows into their matching risk rows as extra columns.
+
+        Looks for a Type column with Risk/Mitigation values. Mitigation rows are
+        matched to risks by a shared key column (e.g. Error_Code) if one exists,
+        otherwise positionally (mitigation must immediately follow its risk).
+
+        Sets a '_mitigated' boolean column: True on risk rows that had a mitigation
+        merged into them. The column is hidden from display by the model.
+        """
+        RISK_VALUES = {'risk', 'hazard', 'error'}
+        MIT_VALUES = {'mitigation', 'control', 'measure', 'control measure'}
+
+        # Find a Type column
+        type_col = None
+        for col in df.columns:
+            if col.lower().replace('_', ' ').strip() in (
+                    'type', 'row type', 'entry type', 'category', 'item type'):
+                type_col = col
+                break
+
+        if type_col is None:
+            df = df.copy()
+            df['_mitigated'] = False
+            return df
+
+        values = df[type_col].astype(str).str.lower().str.strip()
+        has_risks = values.isin(RISK_VALUES).any()
+        has_mitigations = values.isin(MIT_VALUES).any()
+
+        if not has_risks or not has_mitigations:
+            df = df.copy()
+            df['_mitigated'] = False
+            return df
+
+        other_cols = [c for c in df.columns if c != type_col]
+
+        # Try to find a key column for matching (e.g. Error_Code, ID, Code)
+        key_col = None
+        for col in df.columns:
+            norm = col.lower().replace('_', ' ').strip()
+            if norm in ('error code', 'id', 'code', 'risk id', 'hazard id',
+                        'ref', 'reference', 'number', 'no'):
+                key_col = col
+                break
+
+        risk_mask = values.isin(RISK_VALUES)
+        mit_mask = values.isin(MIT_VALUES)
+
+        merged_rows = []
+
+        if key_col:
+            # Build mitigation lookup keyed by the shared key column
+            mit_lookup = {}
+            for _, mit_row in df[mit_mask].iterrows():
+                k = str(mit_row[key_col]).strip() if not pd.isna(mit_row[key_col]) else None
+                if k:
+                    mit_lookup[k] = mit_row
+
+            matched_keys = set()
+            for _, risk_row in df[risk_mask].iterrows():
+                row_data = {col: risk_row[col] for col in other_cols}
+                k = str(risk_row[key_col]).strip() if not pd.isna(risk_row[key_col]) else None
+                if k and k in mit_lookup:
+                    mit_row = mit_lookup[k]
+                    for col in other_cols:
+                        if col == key_col:
+                            continue
+                        val = mit_row[col]
+                        if not pd.isna(val) and str(val).strip():
+                            row_data[f"Mitigation {col}"] = val
+                    row_data['_mitigated'] = True
+                    matched_keys.add(k)
+                else:
+                    row_data['_mitigated'] = False
+                merged_rows.append(row_data)
+
+            # Unmatched mitigation rows that had no corresponding risk
+            for _, mit_row in df[mit_mask].iterrows():
+                k = str(mit_row[key_col]).strip() if not pd.isna(mit_row[key_col]) else None
+                if not k or k not in matched_keys:
+                    row_data = {col: mit_row[col] for col in other_cols}
+                    row_data['_mitigated'] = True
+                    merged_rows.append(row_data)
+
+            # Rows that are neither risk nor mitigation
+            for i, row in df[~risk_mask & ~mit_mask].iterrows():
+                row_data = {col: row[col] for col in other_cols}
+                row_data['_mitigated'] = False
+                merged_rows.append(row_data)
+
+        else:
+            # Positional: mitigation must immediately follow its risk row
+            i = 0
+            while i < len(df):
+                row_type = str(df.iloc[i][type_col]).lower().strip()
+                if row_type in RISK_VALUES:
+                    row_data = {col: df.iloc[i][col] for col in other_cols}
+                    if i + 1 < len(df):
+                        next_type = str(df.iloc[i + 1][type_col]).lower().strip()
+                        if next_type in MIT_VALUES:
+                            for col in other_cols:
+                                val = df.iloc[i + 1][col]
+                                if not pd.isna(val) and str(val).strip():
+                                    row_data[f"Mitigation {col}"] = val
+                            row_data['_mitigated'] = True
+                            merged_rows.append(row_data)
+                            i += 2
+                            continue
+                    row_data['_mitigated'] = False
+                    merged_rows.append(row_data)
+                elif row_type in MIT_VALUES:
+                    # Unmatched standalone mitigation row
+                    row_data = {col: df.iloc[i][col] for col in other_cols}
+                    row_data['_mitigated'] = True
+                    merged_rows.append(row_data)
+                else:
+                    row_data = {col: df.iloc[i][col] for col in other_cols}
+                    row_data['_mitigated'] = False
+                    merged_rows.append(row_data)
+                i += 1
+
+        return pd.DataFrame(merged_rows) if merged_rows else df

@@ -8,8 +8,10 @@ from PyQt5.QtGui import QFont, QColor, QPen, QBrush, QPainter, QPixmap
 from PyQt5.QtCore import QUrl, QThread, pyqtSignal
 import math
 import os
+import sys
 import tempfile
 import re
+import datetime
 import pygit2
 import subprocess
 import platform
@@ -541,6 +543,11 @@ class SystemView(QWidget):
         self.materials_button.clicked.connect(self.view_materials_csv)
         self.materials_button.hide()
         right_layout.addWidget(self.materials_button)
+
+        self.tests_button = self.create_button("Tests")
+        self.tests_button.clicked.connect(self.open_tests)
+        self.tests_button.hide()
+        right_layout.addWidget(self.tests_button)
 
         # Replace both download buttons with a single one
         self.download_module_button = self.create_button("Download Module")
@@ -1126,13 +1133,14 @@ class SystemView(QWidget):
             self.build_instructions_label.hide()
             self.construct_button.hide()
 
-        # Check for Other Documents (BOM, Risk Assessment, Failure Mode)
+        # Check for Other Documents (BOM, Risk Assessment, Failure Mode, Tests)
         has_bom = self.has_csv_in_children(node, self.check_for_bom_file)
         has_risk = self.has_csv_in_children(node, self.check_risk_assessment_file)
         has_failure_mode = self.has_csv_in_children(node, self.check_for_failure_mode_csv)
+        has_tests = self.has_csv_in_children(node, self.check_for_test_files)
 
         # Show/hide Other Documents heading based on any document being available
-        if has_bom or has_risk or has_failure_mode:
+        if has_bom or has_risk or has_failure_mode or has_tests:
             self.other_documents_label.show()
         else:
             self.other_documents_label.hide()
@@ -1154,6 +1162,12 @@ class SystemView(QWidget):
             self.failure_mode_button.show()
         else:
             self.failure_mode_button.hide()
+
+        # Check for Python test files (current + children)
+        if has_tests:
+            self.tests_button.show()
+        else:
+            self.tests_button.hide()
 
         # Check for inventory files (current + children)
         if self.has_csv_in_children(node, self.check_for_inventory_csv):
@@ -1320,15 +1334,17 @@ class SystemView(QWidget):
 
         Args:
             csv_path: Path to the CSV file
-            viewer_type: Type of viewer to use ('bom' for BOM with checkboxes, 'generic' for basic viewer)
+            viewer_type: Type of viewer to use ('bom' for BOM with checkboxes, 'risk' for risk assessment, 'generic' for basic viewer)
         """
         try:
             # Import the appropriate CSV viewer class
-            from CSVViewer_widget import CSVViewerWidget, BOMViewerWidget
+            from CSVViewer_widget import CSVViewerWidget, BOMViewerWidget, RiskAssessmentViewerWidget
 
             # Create the appropriate CSV viewer based on type
             if viewer_type == "bom":
                 csv_viewer = BOMViewerWidget(self.parent, csv_path)
+            elif viewer_type == "risk":
+                csv_viewer = RiskAssessmentViewerWidget(self.parent, csv_path)
             else:
                 csv_viewer = CSVViewerWidget(self.parent, csv_path)
 
@@ -1337,7 +1353,7 @@ class SystemView(QWidget):
                 # First, check if a CSV viewer is already in the central widget
                 for i in range(self.parent.central_widget.count()):
                     widget = self.parent.central_widget.widget(i)
-                    if isinstance(widget, (CSVViewerWidget, BOMViewerWidget)):
+                    if isinstance(widget, (CSVViewerWidget, BOMViewerWidget, RiskAssessmentViewerWidget)):
                         # Remove the existing CSV viewer
                         self.parent.central_widget.removeWidget(widget)
                         widget.deleteLater()
@@ -1757,7 +1773,7 @@ class SystemView(QWidget):
             # Current node has its own risk assessment
             if len(risk_files) == 1:
                 # Only current node has risk assessment - open with generic viewer
-                self.open_csv_in_viewer(risk_files[0]['path'], viewer_type="generic")
+                self.open_csv_in_viewer(risk_files[0]['path'], viewer_type="risk")
             else:
                 # Current node + children have risk assessments - show choice dialog
                 self.show_csv_aggregation_dialog(risk_files, "Risk Assessment")
@@ -1775,7 +1791,7 @@ class SystemView(QWidget):
             if reply == QMessageBox.Yes:
                 if len(risk_files) == 1:
                     # Only one child has risk assessment - open it directly
-                    self.open_csv_in_viewer(risk_files[0]['path'], viewer_type="generic")
+                    self.open_csv_in_viewer(risk_files[0]['path'], viewer_type="risk")
                 else:
                     # Multiple children have risk assessments - create aggregated view directly
                     self.create_and_open_aggregated_csv(risk_files, "Risk Assessment")
@@ -1964,7 +1980,7 @@ class SystemView(QWidget):
         if dialog.exec_() == QDialog.Accepted:
             choice = self.csv_choice_group.checkedId()
             # Determine viewer type based on CSV type
-            viewer_type = "bom" if csv_type == "BOM" else "generic"
+            viewer_type = "bom" if csv_type == "BOM" else ("risk" if csv_type == "Risk Assessment" else "generic")
             if choice == 0:
                 # Open current node only
                 current_node_csv = next((f for f in csv_files if f['node'] == self.selected_node), None)
@@ -2012,7 +2028,7 @@ class SystemView(QWidget):
             combined_df.to_csv(temp_path, index=False)
 
             # Open in CSV viewer - use BOM viewer for BOM, generic for others
-            viewer_type = "bom" if csv_type == "BOM" else "generic"
+            viewer_type = "bom" if csv_type == "BOM" else ("risk" if csv_type == "Risk Assessment" else "generic")
             self.open_csv_in_viewer(temp_path, viewer_type=viewer_type)
             
             # Store temp file path for cleanup later
@@ -2159,6 +2175,169 @@ class SystemView(QWidget):
         else:
             self.show_csv_aggregation_dialog(materials_files, "Materials")
 
+
+    def check_for_test_files(self, module_data):
+        """Check if a module has Python test files in any subfolder of lib/.
+        Returns the lib/ directory path if .py files are found, otherwise None."""
+        if not module_data or not isinstance(module_data, dict):
+            return None
+
+        repository_info = module_data.get('repository', {})
+        if not repository_info or not repository_info.get('name'):
+            return None
+
+        repo_dir = os.path.join("Downloaded Repositories", self.parent.repo_folder)
+        module_dir = os.path.join(repo_dir, repository_info.get('name'))
+        lib_dir = os.path.join(module_dir, "lib")
+
+        if not os.path.exists(lib_dir):
+            return None
+
+        try:
+            for root, dirs, files in os.walk(lib_dir):
+                if any(f.endswith('.py') for f in files):
+                    return lib_dir  # Return lib_dir as the base
+        except Exception:
+            pass
+
+        return None
+
+    def open_tests(self):
+        """Show a dialog listing Python test files found in this node and its children"""
+        if not self.selected_node:
+            return
+
+        test_dirs = self.find_csv_in_children(self.selected_node, self.check_for_test_files)
+
+        if not test_dirs:
+            QMessageBox.information(self, "Tests", "No Python test files found.")
+            return
+
+        # Collect all .py files grouped by module (walk all subdirs of lib/)
+        all_tests = []
+        for entry in test_dirs:
+            lib_dir = entry['path']
+            module_root = os.path.dirname(lib_dir)
+            module_name = re.sub(r'\[.*?\]', '', entry['node_name']).strip()
+            try:
+                for walk_root, dirs, files in os.walk(lib_dir):
+                    py_files = sorted(f for f in files if f.endswith('.py'))
+                    for py_file in py_files:
+                        full_path = os.path.join(walk_root, py_file)
+                        rel_path = os.path.relpath(full_path, lib_dir)
+                        all_tests.append({
+                            'module': module_name,
+                            'filename': rel_path,
+                            'full_path': full_path,
+                            'module_root': module_root
+                        })
+            except Exception:
+                continue
+
+        if not all_tests:
+            QMessageBox.information(self, "Tests", "No Python test files found.")
+            return
+
+        # Show a dialog listing all tests
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Tests")
+        dialog.setMinimumSize(500, 350)
+        layout = QVBoxLayout()
+
+        label = QLabel(f"Found {len(all_tests)} test file(s):")
+        label.setFont(QFont('Arial', 11, QFont.Bold))
+        layout.addWidget(label)
+
+        from PyQt5.QtWidgets import QListWidget, QListWidgetItem
+        list_widget = QListWidget()
+        list_widget.setFont(QFont('Arial', 10))
+
+        for test in all_tests:
+            display = f"[{test['module']}]  {test['filename']}"
+            item = QListWidgetItem(display)
+            item.setData(Qt.UserRole, test['full_path'])
+            item.setData(Qt.UserRole + 1, test['module_root'])
+            list_widget.addItem(item)
+
+        list_widget.itemDoubleClicked.connect(lambda item: self._open_test_file(
+            item.data(Qt.UserRole), item.data(Qt.UserRole + 1)))
+        layout.addWidget(list_widget)
+
+        hint = QLabel("Double-click a file to run it. Output is saved to the module's var/ folder.")
+        hint.setStyleSheet("color: grey; font-size: 10px;")
+        layout.addWidget(hint)
+
+        btn_layout = QHBoxLayout()
+        open_btn = QPushButton("Run Selected")
+        open_btn.setStyleSheet(self.get_button_style())
+        open_btn.clicked.connect(lambda: self._open_test_file(
+            list_widget.currentItem().data(Qt.UserRole) if list_widget.currentItem() else None,
+            list_widget.currentItem().data(Qt.UserRole + 1) if list_widget.currentItem() else None
+        ))
+        close_btn = QPushButton("Close")
+        close_btn.setStyleSheet(self.get_button_style())
+        close_btn.clicked.connect(dialog.accept)
+        btn_layout.addWidget(open_btn)
+        btn_layout.addWidget(close_btn)
+        layout.addLayout(btn_layout)
+
+        dialog.setLayout(layout)
+        dialog.exec_()
+
+    def _open_test_file(self, file_path, module_root=None):
+        """Run a Python test file and write stdout/stderr output to the module's var/ directory"""
+        if not file_path or not os.path.exists(file_path):
+            return
+        try:
+            # Infer module_root from path if not provided ({root}/lib/{...}/{file})
+            if not module_root:
+                norm = os.path.normpath(file_path)
+                parts = norm.split(os.sep)
+                try:
+                    lib_idx = next(i for i, p in enumerate(parts) if p.lower() == 'lib')
+                    module_root = os.sep.join(parts[:lib_idx]) or '.'
+                except StopIteration:
+                    module_root = os.path.dirname(os.path.dirname(file_path))
+
+            # Create var/ directory if it doesn't exist
+            var_dir = os.path.join(module_root, "var")
+            os.makedirs(var_dir, exist_ok=True)
+
+            # Build output file path
+            stem = os.path.splitext(os.path.basename(file_path))[0]
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_path = os.path.join(var_dir, f"{stem}_{timestamp}.txt")
+
+            # Run the script, capturing stdout and stderr
+            result = subprocess.run(
+                [sys.executable, file_path],
+                capture_output=True,
+                text=True,
+                cwd=module_root
+            )
+
+            # Write captured output to the log file
+            with open(output_path, 'w') as f:
+                f.write(f"Test: {file_path}\n")
+                f.write(f"Run at: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"Return code: {result.returncode}\n")
+                f.write("=" * 60 + "\n")
+                if result.stdout:
+                    f.write("STDOUT:\n")
+                    f.write(result.stdout)
+                    f.write("\n")
+                if result.stderr:
+                    f.write("STDERR:\n")
+                    f.write(result.stderr)
+                    f.write("\n")
+
+            status = "PASSED" if result.returncode == 0 else "FAILED"
+            QMessageBox.information(
+                self, f"Test {status}",
+                f"Test finished with return code {result.returncode}.\n\nOutput saved to:\n{output_path}"
+            )
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Could not run test: {str(e)}")
 
     def download_single_module(self, node):
         """Download a single module - delegates to download manager"""
