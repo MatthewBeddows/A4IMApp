@@ -1,10 +1,54 @@
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QPushButton,
-    QLabel, QTextEdit, QMessageBox
+    QLabel, QTextEdit, QMessageBox, QListWidgetItem
 )
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
 import os
+import re
+import subprocess
+import sys
+import datetime
+
+
+SCRIPT_EXTENSIONS = {'.py', '.sh', '.js', '.r', '.rb'}
+
+RUNNERS = {
+    '.py': [sys.executable],
+    '.sh': ['bash'],
+    '.js': ['node'],
+    '.r':  ['Rscript'],
+    '.rb': ['ruby'],
+}
+
+SCRIPT_ICONS = {
+    '.py': '🐍',
+    '.sh': '⚙',
+    '.js': 'JS',
+    '.r':  'R',
+    '.rb': '💎',
+}
+
+
+def find_script_links(md_file_path):
+    """Parse a markdown file and return list of (label, abs_path) for script links."""
+    try:
+        with open(md_file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+    except Exception:
+        return []
+
+    base_dir = os.path.dirname(md_file_path)
+    results = []
+    for match in re.finditer(r'\[([^\]]+)\]\(([^)]+)\)', content):
+        label = match.group(1)
+        href = match.group(2)
+        if not href.startswith('http'):
+            ext = os.path.splitext(href)[1].lower()
+            if ext in SCRIPT_EXTENSIONS:
+                abs_path = os.path.normpath(os.path.join(base_dir, href))
+                results.append((label, abs_path))
+    return results
 
 
 class MarkdownSelectionWidget(QWidget):
@@ -16,6 +60,7 @@ class MarkdownSelectionWidget(QWidget):
         self.md_files = md_files
         self.doc_folder = doc_folder
         self.open_viewers = []
+        self.current_scripts = []  # list of (label, abs_path) for selected file
         self.init_ui()
 
     def init_ui(self):
@@ -23,23 +68,20 @@ class MarkdownSelectionWidget(QWidget):
         main_layout.setContentsMargins(20, 30, 20, 30)
         main_layout.setSpacing(20)
 
-        # Title header
         title_header = QLabel("Documentation Viewer")
         title_header.setFont(QFont('Arial', 18, QFont.Bold))
         title_header.setStyleSheet("color: #465775; margin-bottom: 10px;")
         main_layout.addWidget(title_header)
 
-        # Description
         description = QLabel("Select a documentation file to view it.")
         description.setFont(QFont('Arial', 12))
         description.setStyleSheet("color: #666; margin-bottom: 10px;")
         main_layout.addWidget(description)
 
-        # Horizontal layout for content
         content_layout = QHBoxLayout()
         content_layout.setSpacing(20)
 
-        # Left side: Documentation list
+        # Left side: file list
         self.list_widget = QListWidget()
         self.list_widget.setStyleSheet("""
             QListWidget {
@@ -62,16 +104,21 @@ class MarkdownSelectionWidget(QWidget):
             }
         """)
         self.list_widget.addItems(sorted(self.md_files))
+        self.list_widget.itemClicked.connect(self.on_item_clicked)
         self.list_widget.itemDoubleClicked.connect(self.on_item_double_clicked)
         content_layout.addWidget(self.list_widget, 1)
 
-        # Right side: Content area and buttons
-        right_layout = QVBoxLayout()
+        if self.list_widget.count() > 0:
+            self.list_widget.setCurrentRow(0)
 
-        # Content area - show instructions
-        content_area = QTextEdit()
-        content_area.setReadOnly(True)
-        content_area.setStyleSheet("""
+        # Right side
+        right_layout = QVBoxLayout()
+        right_layout.setSpacing(10)
+
+        # Instructions area
+        self.content_area = QTextEdit()
+        self.content_area.setReadOnly(True)
+        self.content_area.setStyleSheet("""
             QTextEdit {
                 background-color: #f8f8f8;
                 border: 1px solid #ccc;
@@ -81,26 +128,75 @@ class MarkdownSelectionWidget(QWidget):
                 font-size: 14px;
             }
         """)
-        content_area.setHtml("""
+        self.content_area.setHtml("""
             <div style="text-align: center;">
                 <h2>Documentation Files</h2>
                 <p>Select a documentation file from the list to view it.</p>
-                <p>You can:</p>
                 <ul style="text-align: left;">
-                    <li>Double-click a file to open it in a new window</li>
-                    <li>Select a file and click "Open" button</li>
+                    <li>Single-click to preview linked scripts</li>
+                    <li>Double-click or use Open to view the file</li>
                     <li>Open multiple files at once</li>
-                    <li>Click "Back" to return to System View</li>
+                    <li>Click Back to return to System View</li>
                 </ul>
             </div>
         """)
-        right_layout.addWidget(content_area, 1)
+        right_layout.addWidget(self.content_area, 1)
 
-        # Button layout
+        # Linked Scripts section (hidden until a file with scripts is selected)
+        self.scripts_label = QLabel("Linked Scripts")
+        self.scripts_label.setFont(QFont('Arial', 11, QFont.Bold))
+        self.scripts_label.setStyleSheet("color: #465775; margin-top: 5px;")
+        self.scripts_label.hide()
+        right_layout.addWidget(self.scripts_label)
+
+        self.scripts_list = QListWidget()
+        self.scripts_list.setMaximumHeight(120)
+        self.scripts_list.setStyleSheet("""
+            QListWidget {
+                background-color: #f0f4f8;
+                border: 1px solid #ccc;
+                border-radius: 5px;
+                padding: 5px;
+                font-size: 13px;
+            }
+            QListWidget::item {
+                padding: 6px;
+                border-bottom: 1px solid #ddd;
+            }
+            QListWidget::item:selected {
+                background-color: #465775;
+                color: white;
+            }
+            QListWidget::item:hover {
+                background-color: #dce8f5;
+            }
+        """)
+        self.scripts_list.hide()
+        right_layout.addWidget(self.scripts_list)
+
+        self.run_script_button = QPushButton("Run Script")
+        self.run_script_button.setFixedHeight(36)
+        self.run_script_button.setStyleSheet("""
+            QPushButton {
+                background-color: #2e7d32;
+                border: none;
+                border-radius: 18px;
+                color: white;
+                font-size: 12px;
+                padding: 8px;
+            }
+            QPushButton:hover { background-color: #388e3c; }
+            QPushButton:pressed { background-color: #1b5e20; }
+            QPushButton:disabled { background-color: #aaa; }
+        """)
+        self.run_script_button.clicked.connect(self.on_run_script_clicked)
+        self.run_script_button.hide()
+        right_layout.addWidget(self.run_script_button)
+
+        # Open / Back buttons
         button_layout = QHBoxLayout()
         button_layout.setSpacing(10)
 
-        # Open button
         open_button = QPushButton("Open")
         open_button.setFixedHeight(40)
         open_button.setStyleSheet("""
@@ -118,7 +214,6 @@ class MarkdownSelectionWidget(QWidget):
         open_button.clicked.connect(self.on_open_clicked)
         button_layout.addWidget(open_button)
 
-        # Back button
         back_button = QPushButton("Back")
         back_button.setFixedHeight(40)
         back_button.setStyleSheet("""
@@ -141,6 +236,85 @@ class MarkdownSelectionWidget(QWidget):
         main_layout.addLayout(content_layout)
 
         self.setLayout(main_layout)
+
+        # Populate scripts panel for the initially selected item
+        if self.list_widget.count() > 0:
+            first_file = os.path.join(self.doc_folder, self.list_widget.item(0).text())
+            self.current_scripts = find_script_links(first_file)
+            self.update_scripts_panel()
+
+    def on_item_clicked(self, item):
+        file_path = os.path.join(self.doc_folder, item.text())
+        self.current_scripts = find_script_links(file_path)
+        self.update_scripts_panel()
+
+    def update_scripts_panel(self):
+        self.scripts_list.clear()
+        if self.current_scripts:
+            for label, abs_path in self.current_scripts:
+                ext = os.path.splitext(abs_path)[1].lower()
+                icon = SCRIPT_ICONS.get(ext, '')
+                display = f"{icon}  {label}  ({os.path.basename(abs_path)})"
+                self.scripts_list.addItem(display)
+            self.scripts_label.show()
+            self.scripts_list.show()
+            self.run_script_button.show()
+        else:
+            self.scripts_label.hide()
+            self.scripts_list.hide()
+            self.run_script_button.hide()
+
+    def on_run_script_clicked(self):
+        idx = self.scripts_list.currentRow()
+        if idx < 0:
+            if self.current_scripts:
+                idx = 0  # default to first script if none selected
+            else:
+                return
+        _, file_path = self.current_scripts[idx]
+        self.run_script(file_path)
+
+    def run_script(self, file_path):
+        ext = os.path.splitext(file_path)[1].lower()
+        cmd = RUNNERS.get(ext)
+        if not cmd:
+            QMessageBox.warning(self, "Unsupported", f"No runner configured for {ext} files.")
+            return
+        try:
+            script_dir = os.path.dirname(file_path)
+            var_dir = os.path.join(script_dir, 'var')
+            os.makedirs(var_dir, exist_ok=True)
+
+            stem = os.path.splitext(os.path.basename(file_path))[0]
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_path = os.path.join(var_dir, f"{stem}_{timestamp}.txt")
+
+            result = subprocess.run(
+                cmd + [file_path],
+                capture_output=True,
+                text=True,
+                cwd=script_dir
+            )
+
+            with open(output_path, 'w') as f:
+                f.write(f"Script: {file_path}\n")
+                f.write(f"Run at: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"Return code: {result.returncode}\n")
+                f.write("=" * 60 + "\n")
+                if result.stdout:
+                    f.write("STDOUT:\n")
+                    f.write(result.stdout)
+                if result.stderr:
+                    f.write("STDERR:\n")
+                    f.write(result.stderr)
+
+            status = "Completed" if result.returncode == 0 else "FAILED"
+            QMessageBox.information(
+                self, f"Script {status}",
+                f"{os.path.basename(file_path)} finished (code {result.returncode}).\n\nOutput saved to:\n{output_path}"
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to run script:\n{str(e)}")
 
     def on_item_double_clicked(self, item):
         file_path = os.path.join(self.doc_folder, item.text())
