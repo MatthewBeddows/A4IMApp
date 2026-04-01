@@ -5,7 +5,23 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, QUrl
 from PyQt5.QtGui import QFont
 import os
+import re
 import markdown
+import subprocess
+import sys
+import datetime
+import webbrowser
+
+
+SCRIPT_EXTENSIONS = {'.py', '.sh', '.js', '.r', '.rb'}
+
+RUNNERS = {
+    '.py': [sys.executable],
+    '.sh': ['bash'],
+    '.js': ['node'],
+    '.r':  ['Rscript'],
+    '.rb': ['ruby'],
+}
 
 
 class MarkdownViewerWidget(QWidget):
@@ -22,21 +38,93 @@ class MarkdownViewerWidget(QWidget):
         layout = QVBoxLayout()
 
         self.text_browser = QTextBrowser()
-        self.text_browser.setOpenExternalLinks(True)
+        self.text_browser.setOpenLinks(False)
+        self.text_browser.setOpenExternalLinks(False)
+        self.text_browser.anchorClicked.connect(self.handle_link_clicked)
         self.text_browser.setFont(QFont("Arial", 10))
         layout.addWidget(self.text_browser)
 
         self.setLayout(layout)
+
+    def handle_link_clicked(self, url):
+        href = url.toString()
+
+        # Resolve relative paths
+        if url.isLocalFile():
+            resolved = url.toLocalFile()
+        elif not href.startswith('http'):
+            base_dir = os.path.dirname(self.file_path)
+            resolved = os.path.normpath(os.path.join(base_dir, href))
+        else:
+            webbrowser.open(href)
+            return
+
+        ext = os.path.splitext(resolved)[1].lower()
+        if ext in SCRIPT_EXTENSIONS:
+            self.run_script(resolved)
+        else:
+            webbrowser.open(resolved)
+
+    def run_script(self, file_path):
+        ext = os.path.splitext(file_path)[1].lower()
+        cmd = RUNNERS.get(ext)
+        if not cmd:
+            QMessageBox.warning(self, "Unsupported", f"No runner configured for {ext} files.")
+            return
+        try:
+            script_dir = os.path.dirname(file_path)
+            var_dir = os.path.join(script_dir, 'var')
+            os.makedirs(var_dir, exist_ok=True)
+
+            stem = os.path.splitext(os.path.basename(file_path))[0]
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_path = os.path.join(var_dir, f"{stem}_{timestamp}.txt")
+
+            result = subprocess.run(
+                cmd + [file_path],
+                capture_output=True,
+                text=True,
+                cwd=script_dir
+            )
+
+            with open(output_path, 'w') as f:
+                f.write(f"Script: {file_path}\n")
+                f.write(f"Run at: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"Return code: {result.returncode}\n")
+                f.write("=" * 60 + "\n")
+                if result.stdout:
+                    f.write("STDOUT:\n")
+                    f.write(result.stdout)
+                if result.stderr:
+                    f.write("STDERR:\n")
+                    f.write(result.stderr)
+
+            status = "Completed" if result.returncode == 0 else "FAILED"
+            QMessageBox.information(
+                self, f"Script {status}",
+                f"{os.path.basename(file_path)} finished (code {result.returncode}).\n\nOutput saved to:\n{output_path}"
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to run script:\n{str(e)}")
 
     def load_markdown(self):
         try:
             with open(self.file_path, 'r', encoding='utf-8') as f:
                 md_content = f.read()
 
-            # Convert markdown to HTML
+            # Strip {width=...} / {height=...} attribute syntax before parsing
+            md_content = re.sub(r'\{[^}]*\}', '', md_content)
+
             html_content = markdown.markdown(
                 md_content,
                 extensions=['extra', 'codehilite', 'toc', 'nl2br']
+            )
+
+            # Set max-width on all images via inline style injection
+            html_content = re.sub(
+                r'<img ',
+                '<img style="max-width:100%;height:auto;" ',
+                html_content
             )
 
             styled_html = f"""
@@ -126,6 +214,8 @@ class MarkdownViewerWidget(QWidget):
             </html>
             """
 
+            base_url = QUrl.fromLocalFile(os.path.dirname(os.path.abspath(self.file_path)) + os.sep)
+            self.text_browser.document().setBaseUrl(base_url)
             self.text_browser.setHtml(styled_html)
 
         except Exception as e:

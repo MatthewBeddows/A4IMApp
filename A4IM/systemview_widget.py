@@ -1,7 +1,8 @@
 from PyQt5.QtWidgets import (
     QDialog, QFormLayout, QComboBox, QDialogButtonBox, QWidget, QHBoxLayout, QVBoxLayout, QTextEdit, QPushButton, QLabel, QLineEdit, QCheckBox,
     QGraphicsView, QGraphicsScene, QGraphicsRectItem, QGraphicsTextItem,
-    QGraphicsLineItem, QGraphicsItem, QGraphicsPixmapItem, QMessageBox, QApplication, QRadioButton, QButtonGroup
+    QGraphicsLineItem, QGraphicsItem, QGraphicsPixmapItem, QMessageBox, QApplication, QRadioButton, QButtonGroup,
+    QTabWidget, QGridLayout, QSizePolicy, QListWidget, QListWidgetItem
 )
 from PyQt5.QtCore import Qt, QPointF, QRectF, QLineF
 from PyQt5.QtGui import QFont, QColor, QPen, QBrush, QPainter, QPixmap
@@ -402,6 +403,16 @@ class SystemView(QWidget):
         # button_layout.addWidget(self.add_module_button)
 
         graphics_layout.addLayout(button_layout)
+
+        back_button = QPushButton("Back")
+        back_button.setStyleSheet(self.get_button_style())
+        back_button.clicked.connect(self.parent.show_main_menu)
+        back_button.setFixedSize(100, 30)
+        back_row = QHBoxLayout()
+        back_row.addWidget(back_button)
+        back_row.addStretch()
+        graphics_layout.addLayout(back_row)
+
         left_layout.addWidget(graphics_container)
 
         # Right layout for module details and buttons
@@ -493,72 +504,83 @@ class SystemView(QWidget):
         """)
         right_layout.addWidget(self.module_details)
 
-        # Buttons at the bottom
-        # Build Instructions section
-        self.build_instructions_label = QLabel("Build Instructions")
-        self.build_instructions_label.setFont(QFont('Arial', 12, QFont.Bold))
-        self.build_instructions_label.setStyleSheet("color: #465775; margin-top: 10px;")
-        self.build_instructions_label.hide()
-        right_layout.addWidget(self.build_instructions_label)
-
-        self.construct_button = self.create_button("Construct")
+        # Setup button — direct action, no tab needed
+        self.construct_button = self.create_button("Setup")
         self.construct_button.clicked.connect(self.construct_module)
         self.construct_button.hide()
         right_layout.addWidget(self.construct_button)
 
-        # Other Documents section
-        self.other_documents_label = QLabel("Other Documents")
-        self.other_documents_label.setFont(QFont('Arial', 12, QFont.Bold))
-        self.other_documents_label.setStyleSheet("color: #465775; margin-top: 10px;")
-        self.other_documents_label.hide()
-        right_layout.addWidget(self.other_documents_label)
+        # Documents section — label + list widget
+        self.docs_section_label = QLabel("Documents")
+        self.docs_section_label.setFont(QFont('Arial', 12, QFont.Bold))
+        self.docs_section_label.setStyleSheet("color: #465775; margin-top: 6px;")
+        self.docs_section_label.hide()
+        right_layout.addWidget(self.docs_section_label)
 
-        self.view_bom_button = self.create_button("View Module BOM")
+        self.docs_list = QListWidget()
+        self.docs_list.setStyleSheet("""
+            QListWidget {
+                background-color: #f8f8f8;
+                border: 1px solid #ccc;
+                border-radius: 5px;
+                font-size: 14px;
+            }
+            QListWidget::item {
+                border-bottom: 1px solid #eee;
+                padding: 8px;
+            }
+            QListWidget::item:selected {
+                background-color: #465775;
+                color: white;
+            }
+            QListWidget::item:hover {
+                background-color: #e0e0e0;
+            }
+        """)
+        self.docs_list.itemClicked.connect(self._docs_item_clicked)
+        self.docs_list.hide()
+        right_layout.addWidget(self.docs_list)
+
+        # Keep button references as hidden widgets so existing click handlers work
+        self.view_bom_button = QPushButton()
         self.view_bom_button.clicked.connect(self.view_module_bom)
         self.view_bom_button.hide()
-        right_layout.addWidget(self.view_bom_button)
 
-        self.risk_button = self.create_button("Risk Assessment")
+        self.risk_button = QPushButton()
         self.risk_button.clicked.connect(self.open_risk_assessment)
         self.risk_button.hide()
-        right_layout.addWidget(self.risk_button)
 
-        self.failure_mode_button = self.create_button("Failure Mode")
+        self.failure_mode_button = QPushButton()
         self.failure_mode_button.clicked.connect(self.open_failure_mode)
         self.failure_mode_button.hide()
-        right_layout.addWidget(self.failure_mode_button)
 
-        # Additional CSV buttons
-        self.inventory_button = self.create_button("View Inventory")
-        self.inventory_button.clicked.connect(self.view_inventory_csv)
-        self.inventory_button.hide()
-        right_layout.addWidget(self.inventory_button)
-
-        self.parts_button = self.create_button("View Parts")
-        self.parts_button.clicked.connect(self.view_parts_csv)
-        self.parts_button.hide()
-        right_layout.addWidget(self.parts_button)
-
-        self.materials_button = self.create_button("View Materials")
-        self.materials_button.clicked.connect(self.view_materials_csv)
-        self.materials_button.hide()
-        right_layout.addWidget(self.materials_button)
-
-        self.tests_button = self.create_button("Tests")
+        self.tests_button = QPushButton()
         self.tests_button.clicked.connect(self.open_tests)
         self.tests_button.hide()
-        right_layout.addWidget(self.tests_button)
 
-        # Replace both download buttons with a single one
+        self.inventory_button = QPushButton()
+        self.inventory_button.clicked.connect(self.view_inventory_csv)
+        self.inventory_button.hide()
+
+        self.parts_button = QPushButton()
+        self.parts_button.clicked.connect(self.view_parts_csv)
+        self.parts_button.hide()
+
+        self.materials_button = QPushButton()
+        self.materials_button.clicked.connect(self.view_materials_csv)
+        self.materials_button.hide()
+
+        # Download button — direct action, no tab needed
         self.download_module_button = self.create_button("Download Module")
         self.download_module_button.clicked.connect(self.show_download_dialog)
         self.download_module_button.hide()
         right_layout.addWidget(self.download_module_button)
 
-
-        back_button = self.create_button("Back")
-        back_button.clicked.connect(self.parent.show_main_menu)
-        right_layout.addWidget(back_button)
+        # Placeholder shown when no node is selected
+        self.no_selection_label = QLabel("Select a module from the graph to view details.")
+        self.no_selection_label.setStyleSheet("color: #aaaaaa; font-size: 13px;")
+        self.no_selection_label.setAlignment(Qt.AlignCenter)
+        right_layout.addWidget(self.no_selection_label)
 
 
 
@@ -1123,76 +1145,49 @@ class SystemView(QWidget):
         self.completion_checkbox.setChecked(node.completed)
         self.completion_checkbox.blockSignals(False)
 
-        # Check if module has docs (Build Instructions section)
+        self.no_selection_label.hide()
+
+        # Setup button — show only if build instructions exist
         doc_file_path = self.check_module_documentation(data)
-        has_build_instructions = doc_file_path is not None
-        if has_build_instructions:
-            self.build_instructions_label.show()
-            self.construct_button.show()
-        else:
-            self.build_instructions_label.hide()
-            self.construct_button.hide()
+        self.construct_button.setVisible(doc_file_path is not None)
 
-        # Check for Other Documents (BOM, Risk Assessment, Failure Mode, Tests)
-        has_bom = self.has_csv_in_children(node, self.check_for_bom_file)
-        has_risk = self.has_csv_in_children(node, self.check_risk_assessment_file)
-        has_failure_mode = self.has_csv_in_children(node, self.check_for_failure_mode_csv)
-        has_tests = self.has_csv_in_children(node, self.check_for_test_files)
+        # Documents — build list from available docs
+        self.docs_list.clear()
+        doc_entries = [
+            (self.has_csv_in_children(node, self.check_for_bom_file),        "Module BOM",       "bom"),
+            (self.has_csv_in_children(node, self.check_risk_assessment_file), "Risk Assessment",  "risk"),
+            (self.has_csv_in_children(node, self.check_for_failure_mode_csv), "Failure Mode",     "failure"),
+            (self.has_csv_in_children(node, self.check_for_test_files),       "Tests",            "tests"),
+            (self.has_csv_in_children(node, self.check_for_inventory_csv),    "Inventory",        "inventory"),
+            (self.has_csv_in_children(node, self.check_for_parts_csv),        "Parts",            "parts"),
+            (self.has_csv_in_children(node, self.check_for_materials_csv),    "Materials",        "materials"),
+        ]
+        for available, label, key in doc_entries:
+            if available:
+                item = QListWidgetItem(label)
+                item.setData(Qt.UserRole, key)
+                self.docs_list.addItem(item)
+        has_any_docs = self.docs_list.count() > 0
+        self.docs_section_label.setVisible(has_any_docs)
+        self.docs_list.setVisible(has_any_docs)
 
-        # Show/hide Other Documents heading based on any document being available
-        if has_bom or has_risk or has_failure_mode or has_tests:
-            self.other_documents_label.show()
-        else:
-            self.other_documents_label.hide()
-
-        # Check for BOM files (current + children)
-        if has_bom:
-            self.view_bom_button.show()
-        else:
-            self.view_bom_button.hide()
-
-        # Check if risk assessment exists (current + children)
-        if has_risk:
-            self.risk_button.show()
-        else:
-            self.risk_button.hide()
-
-        # Check for failure mode files (current + children)
-        if has_failure_mode:
-            self.failure_mode_button.show()
-        else:
-            self.failure_mode_button.hide()
-
-        # Check for Python test files (current + children)
-        if has_tests:
-            self.tests_button.show()
-        else:
-            self.tests_button.hide()
-
-        # Check for inventory files (current + children)
-        if self.has_csv_in_children(node, self.check_for_inventory_csv):
-            self.inventory_button.show()
-        else:
-            self.inventory_button.hide()
-
-        # Check for parts files (current + children)
-        if self.has_csv_in_children(node, self.check_for_parts_csv):
-            self.parts_button.show()
-        else:
-            self.parts_button.hide()
-
-        # Check for materials files (current + children)
-        if self.has_csv_in_children(node, self.check_for_materials_csv):
-            self.materials_button.show()
-        else:
-            self.materials_button.hide()
-
-        # Show download button if not downloaded (works for ALL nodes)
-        if not node.is_downloaded:
-            self.download_module_button.show()
-        else:
-            self.download_module_button.hide()
+        # Download button — show only if not yet downloaded
+        self.download_module_button.setVisible(not node.is_downloaded)
             
+    def _docs_item_clicked(self, item):
+        key = item.data(Qt.UserRole)
+        actions = {
+            "bom":       self.view_module_bom,
+            "risk":      self.open_risk_assessment,
+            "failure":   self.open_failure_mode,
+            "tests":     self.open_tests,
+            "inventory": self.view_inventory_csv,
+            "parts":     self.view_parts_csv,
+            "materials": self.view_materials_csv,
+        }
+        if key in actions:
+            actions[key]()
+
     def get_button_style(self):
         return """
             QPushButton {

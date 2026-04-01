@@ -20,7 +20,7 @@ class GitFileReaderApp(QMainWindow):
     def __init__(self, initial_repo_url, repo_folder):
         super().__init__()
         self.setWindowTitle("Orshards Repository Tool")
-        self.setGeometry(100, 100, 800, 600)
+        self.setGeometry(100, 100, 1067, 800)
 
         # Store the initial repository URL
         self.initial_repo_url = initial_repo_url
