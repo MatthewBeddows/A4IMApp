@@ -175,7 +175,7 @@ class CSVViewerWidget(QWidget):
     """Base CSV viewer widget with generic viewing functionality"""
 
     def __init__(self, parent=None, csv_path=None):
-        super().__init__(parent)
+        super().__init__(None)  # No Qt parent — standalone window
         self.parent = parent
         self.csv_path = csv_path
         self.df = None
@@ -278,8 +278,8 @@ class CSVViewerWidget(QWidget):
 
         button_layout.addStretch()
 
-        # Back button
-        self.back_button = self.create_button("Back")
+        # Close button
+        self.back_button = self.create_button("Close")
         self.back_button.clicked.connect(self.close_viewer)
         button_layout.addWidget(self.back_button)
 
@@ -556,19 +556,14 @@ class CSVViewerWidget(QWidget):
             QMessageBox.warning(self, "Error", f"Could not open URL: {str(e)}")
 
     def close_viewer(self):
-        """Close the CSV viewer and return to system view"""
+        """Close the pop-out viewer window"""
         self.close()
-
-        if self.parent:
-            self.parent.central_widget.setCurrentWidget(self.parent.system_view)
-            self.parent.system_view.show()
 
 
 class BOMViewerWidget(CSVViewerWidget):
     """BOM-specific CSV viewer with 'Acquired' checkbox functionality"""
 
     def __init__(self, parent=None, csv_path=None):
-        self.data_modified = False
         super().__init__(parent, csv_path)
 
     def get_model_class(self):
@@ -576,85 +571,19 @@ class BOMViewerWidget(CSVViewerWidget):
         return BOMPandasModel
 
     def on_model_created(self, model):
-        """Connect to model's dataChanged signal to track modifications"""
+        """Auto-save whenever a checkbox changes"""
         model.dataChanged.connect(self.on_data_changed)
 
     def on_data_changed(self, topLeft, bottomRight, roles=None):
-        """Track when data is modified"""
-        self.data_modified = True
-
-    def add_custom_buttons(self, button_layout):
-        """Add Save Changes button for BOM"""
-        self.save_button = self.create_button("Save Changes")
-        self.save_button.clicked.connect(self.save_changes)
-        button_layout.addWidget(self.save_button)
-
-    def save_changes(self):
-        """Save changes to CSV file"""
-        if not self.csv_path or not hasattr(self, 'df') or self.df is None:
-            QMessageBox.warning(self, "Error", "No data loaded to save.")
+        """Save to the original CSV immediately on any change"""
+        if not self.csv_path:
             return
-
         try:
             model = self.table_view.model()
-            if not isinstance(model, BOMPandasModel):
-                QMessageBox.warning(self, "Error", "Invalid data model.")
-                return
-
-            updated_df = model.get_dataframe()
-
-            reply = QMessageBox.question(
-                self, 'Save Changes',
-                f"Save changes to the original file?\n\n{self.csv_path}",
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.No
-            )
-
-            if reply == QMessageBox.Yes:
-                updated_df.to_csv(self.csv_path, index=False)
-                QMessageBox.information(self, "Success", "Changes saved successfully.")
-                self.data_modified = False
-            else:
-                options = QFileDialog.Options()
-                base_name, ext = os.path.splitext(self.csv_path)
-                suggested_path = f"{base_name}_updated{ext}"
-
-                new_path, _ = QFileDialog.getSaveFileName(
-                    self, "Save As", suggested_path,
-                    "CSV Files (*.csv);;All Files (*)", options=options
-                )
-
-                if new_path:
-                    if not new_path.lower().endswith('.csv'):
-                        new_path += '.csv'
-
-                    updated_df.to_csv(new_path, index=False)
-
-                    self.csv_path = new_path
-                    self.load_csv(new_path)
-
-                    QMessageBox.information(self, "Success", f"Changes saved to new file:\n{new_path}")
-                    self.data_modified = False
-
+            if isinstance(model, BOMPandasModel):
+                model.get_dataframe().to_csv(self.csv_path, index=False)
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to save changes: {str(e)}")
-
-    def close_viewer(self):
-        """Close with unsaved changes check"""
-        if self.data_modified:
-            reply = QMessageBox.question(
-                self, 'Unsaved Changes',
-                "You have unsaved changes. Would you like to save before closing?",
-                QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel, QMessageBox.Yes
-            )
-
-            if reply == QMessageBox.Yes:
-                self.save_changes()
-                if self.data_modified:
-                    return
-            elif reply == QMessageBox.Cancel:
-                return
-
-        super().close_viewer()
+            print(f"Auto-save failed: {e}")
 
 
 class RiskAssessmentPandasModel(PandasModel):

@@ -154,19 +154,24 @@ class DownloadManager:
             node.is_downloaded = True
             node.download_indicator.setPlainText("✓")
             node.download_indicator.setDefaultTextColor(QColor("#32CD32"))
-            
-            # Hide download button
-            self.system_view.download_module_button.hide()
-            
+
+            # Ensure repository name is set so doc checks work
+            if 'repository' in node.data and 'name' not in node.data['repository']:
+                node.data['repository']['name'] = repo_name
+
             QMessageBox.information(
-                self.system_view, 
-                "Success", 
+                self.system_view,
+                "Success",
                 f"Downloaded {repo_name}"
             )
+
+            # Refresh right panel to show newly available documents
+            if self.system_view.selected_node is node:
+                self.system_view.node_clicked(node)
         else:
             QMessageBox.critical(
-                self.system_view, 
-                "Error", 
+                self.system_view,
+                "Error",
                 f"Failed to download: {message}"
             )
         

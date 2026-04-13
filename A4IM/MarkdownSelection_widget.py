@@ -1,9 +1,11 @@
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QPushButton,
-    QLabel, QTextEdit, QMessageBox, QListWidgetItem
+    QLabel, QTextBrowser, QMessageBox, QListWidgetItem
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QUrl
 from PyQt5.QtGui import QFont
+import markdown
+from MarkdownViewer_widget import fix_root_relative_paths
 import os
 import re
 import subprocess
@@ -115,30 +117,18 @@ class MarkdownSelectionWidget(QWidget):
         right_layout = QVBoxLayout()
         right_layout.setSpacing(10)
 
-        # Instructions area
-        self.content_area = QTextEdit()
-        self.content_area.setReadOnly(True)
+        # Markdown preview area
+        self.content_area = QTextBrowser()
+        self.content_area.setOpenLinks(False)
         self.content_area.setStyleSheet("""
-            QTextEdit {
+            QTextBrowser {
                 background-color: #f8f8f8;
                 border: 1px solid #ccc;
                 border-radius: 5px;
                 padding: 10px;
                 color: #333;
-                font-size: 14px;
+                font-size: 13px;
             }
-        """)
-        self.content_area.setHtml("""
-            <div style="text-align: center;">
-                <h2>Documentation Files</h2>
-                <p>Select a documentation file from the list to view it.</p>
-                <ul style="text-align: left;">
-                    <li>Single-click to preview linked scripts</li>
-                    <li>Double-click or use Open to view the file</li>
-                    <li>Open multiple files at once</li>
-                    <li>Click Back to return to System View</li>
-                </ul>
-            </div>
         """)
         right_layout.addWidget(self.content_area, 1)
 
@@ -214,7 +204,7 @@ class MarkdownSelectionWidget(QWidget):
         open_button.clicked.connect(self.on_open_clicked)
         button_layout.addWidget(open_button)
 
-        back_button = QPushButton("Back")
+        back_button = QPushButton("Close")
         back_button.setFixedHeight(40)
         back_button.setStyleSheet("""
             QPushButton {
@@ -237,16 +227,41 @@ class MarkdownSelectionWidget(QWidget):
 
         self.setLayout(main_layout)
 
-        # Populate scripts panel for the initially selected item
+        # Preview and populate scripts for the initially selected item
         if self.list_widget.count() > 0:
             first_file = os.path.join(self.doc_folder, self.list_widget.item(0).text())
+            self.preview_markdown(first_file)
             self.current_scripts = find_script_links(first_file)
             self.update_scripts_panel()
 
     def on_item_clicked(self, item):
         file_path = os.path.join(self.doc_folder, item.text())
+        self.preview_markdown(file_path)
         self.current_scripts = find_script_links(file_path)
         self.update_scripts_panel()
+
+    def preview_markdown(self, file_path):
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                md_content = f.read()
+
+            md_content = re.sub(r'\{[^}]*\}', '', md_content)
+            html_body = markdown.markdown(md_content, extensions=['extra', 'nl2br'])
+            html_body = re.sub(r'<img ', '<img style="max-width:100%;height:auto;" ', html_body)
+            html_body = fix_root_relative_paths(html_body, file_path)
+
+            styled = f"""<html><head><style>
+                body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+                h1,h2,h3 {{ color: #465775; }}
+                code {{ background:#f0f0f0; padding:2px 4px; border-radius:3px; }}
+                pre {{ background:#f0f0f0; padding:10px; border-radius:5px; }}
+            </style></head><body>{html_body}</body></html>"""
+
+            base_url = QUrl.fromLocalFile(os.path.dirname(file_path) + os.sep)
+            self.content_area.document().setBaseUrl(base_url)
+            self.content_area.setHtml(styled)
+        except Exception as e:
+            self.content_area.setPlainText(f"Could not preview file:\n{e}")
 
     def update_scripts_panel(self):
         self.scripts_list.clear()
@@ -333,21 +348,26 @@ class MarkdownSelectionWidget(QWidget):
             from MarkdownViewer_widget import MarkdownViewerWidget
 
             md_viewer = MarkdownViewerWidget(None, file_path)
+            md_viewer.setAttribute(Qt.WA_DeleteOnClose, True)
             md_viewer.setWindowTitle(f"Documentation - {os.path.basename(file_path)}")
             md_viewer.resize(1000, 700)
             md_viewer.show()
 
             self.open_viewers.append(md_viewer)
 
+            # Also keep a reference in SystemView so the window survives
+            # after this selection widget is closed
+            if hasattr(self.parent, 'system_view'):
+                sv = self.parent.system_view
+                if not hasattr(sv, '_open_viewers'):
+                    sv._open_viewers = []
+                sv._open_viewers.append(md_viewer)
+                md_viewer.destroyed.connect(
+                    lambda: sv._open_viewers.remove(md_viewer) if md_viewer in sv._open_viewers else None
+                )
+
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to open markdown viewer: {str(e)}")
 
     def go_back(self):
-        if hasattr(self.parent, 'central_widget'):
-            for i in range(self.parent.central_widget.count()):
-                widget = self.parent.central_widget.widget(i)
-                if widget.__class__.__name__ == 'SystemView':
-                    self.parent.central_widget.setCurrentWidget(widget)
-                    self.parent.central_widget.removeWidget(self)
-                    self.deleteLater()
-                    break
+        self.close()

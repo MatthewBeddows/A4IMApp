@@ -1,6 +1,7 @@
 import sys
 import os
 import json
+import shutil
 import datetime
 import requests
 
@@ -20,7 +21,7 @@ class GitFileReaderApp(QMainWindow):
     def __init__(self, initial_repo_url, repo_folder):
         super().__init__()
         self.setWindowTitle("Orshards Repository Tool")
-        self.setGeometry(100, 100, 1067, 800)
+        self.setGeometry(100, 100, 1400, 950)
 
         # Store the initial repository URL
         self.initial_repo_url = initial_repo_url
@@ -293,6 +294,9 @@ class GitFileReaderApp(QMainWindow):
             self.loading_complete = True
             self.main_menu.show()
             self.show_main_menu()
+            if getattr(self, '_pending_sync', False):
+                self._pending_sync = False
+                self.sync_downloaded_repos()
 
     def run_git_building(self):
         self.git_building_runner.run()
@@ -302,6 +306,7 @@ class GitFileReaderApp(QMainWindow):
     
     def show_main_menu(self):
         if self.loading_complete:
+            self.main_menu.refresh_project_info()
             self.central_widget.setCurrentWidget(self.main_menu)
     
     def show_system_view(self):
@@ -314,8 +319,113 @@ class GitFileReaderApp(QMainWindow):
         self.git_building.load_url(url)
         self.central_widget.setCurrentWidget(self.git_building)
 
+    def collect_hierarchy_repos(self, modules):
+        """Recursively collect {repo_name: {address, branch}} for all modules."""
+        result = {}
+        for data in modules.values():
+            repo = data.get('repository', {})
+            name = repo.get('name')
+            if name:
+                result[name] = {
+                    'address': repo.get('address', ''),
+                    'branch': repo.get('branch'),
+                }
+            submodules = data.get('submodules', {})
+            if submodules:
+                result.update(self.collect_hierarchy_repos(submodules))
+        return result
+
+    def sync_downloaded_repos(self):
+        """Delete repos no longer in the hierarchy and download missing ones."""
+        repo_dir = os.path.join("Downloaded Repositories", self.repo_folder)
+        if not os.path.exists(repo_dir):
+            return
+
+        # Build expected set from hierarchy
+        expected = self.collect_hierarchy_repos(self.modules)
+        # Always keep the root architect repo
+        root_name = self.initial_repo_url.rstrip('/').split('/')[-1].replace('.git', '')
+        expected.setdefault(root_name, {'address': self.initial_repo_url, 'branch': None})
+
+        # What's on disk (directories only, skip hidden/metadata)
+        on_disk = set()
+        for entry in os.listdir(repo_dir):
+            if os.path.isdir(os.path.join(repo_dir, entry)) and not entry.startswith('.'):
+                on_disk.add(entry)
+
+        to_remove = sorted(on_disk - set(expected.keys()))
+        to_download = {n: v for n, v in expected.items() if n not in on_disk and v.get('address')}
+
+        if not to_remove and not to_download:
+            QMessageBox.information(self, "Sync Complete", "Everything is already up to date.")
+            return
+
+        # Build confirmation message
+        parts = []
+        if to_remove:
+            parts.append("Remove legacy repos:\n  • " + "\n  • ".join(to_remove))
+        if to_download:
+            parts.append("Download missing repos:\n  • " + "\n  • ".join(sorted(to_download)))
+
+        reply = QMessageBox.question(
+            self, "Sync Hierarchy",
+            "\n\n".join(parts) + "\n\nProceed?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        # Delete legacy repos
+        for name in to_remove:
+            path = os.path.join(repo_dir, name)
+            try:
+                shutil.rmtree(path)
+                print(f"Deleted legacy repo: {name}")
+            except Exception as e:
+                QMessageBox.warning(self, "Delete Error", f"Could not delete {name}:\n{e}")
+
+        # Queue downloads for missing repos
+        if to_download:
+            self._sync_queue = [(name, info['address'], info.get('branch'))
+                                for name, info in to_download.items()]
+            self._sync_index = 0
+            self._start_next_sync_download(repo_dir)
+        else:
+            QMessageBox.information(self, "Sync Complete", "Legacy repos removed.")
+
+    def _start_next_sync_download(self, repo_dir):
+        """Download the next repo in the sync queue sequentially."""
+        from download_manager import DownloadWorker
+        if self._sync_index >= len(self._sync_queue):
+            QMessageBox.information(self, "Sync Complete", "Hierarchy sync finished.")
+            # Refresh the system view if it was open
+            if self.loading_complete:
+                self.system_view.populate_modules(self.modules)
+            return
+
+        name, address, branch = self._sync_queue[self._sync_index]
+        local_path = os.path.join(repo_dir, name)
+        self.loading_widget.update_message(
+            f"Downloading {name} ({self._sync_index + 1}/{len(self._sync_queue)})..."
+        )
+        self.central_widget.setCurrentWidget(self.loading_widget)
+
+        worker = DownloadWorker(address, local_path, branch)
+        worker.finished.connect(lambda ok, msg, n=name, rd=repo_dir: self._on_sync_download_done(ok, msg, n, rd))
+        worker.start()
+        self._sync_worker = worker  # keep reference
+
+    def _on_sync_download_done(self, success, message, name, repo_dir):
+        if not success:
+            QMessageBox.warning(self, "Download Failed", f"Failed to download {name}:\n{message}")
+        else:
+            print(f"Sync downloaded: {name}")
+        self._sync_index += 1
+        self.show_main_menu()
+        self._start_next_sync_download(repo_dir)
+
     def refresh_hierarchy(self):
-        """Delete cache and re-fetch hierarchy from online"""
+        """Delete cache, re-fetch hierarchy, then sync downloaded repos."""
         cache_path = self.get_cache_file_path()
         if os.path.exists(cache_path):
             os.remove(cache_path)
@@ -324,6 +434,9 @@ class GitFileReaderApp(QMainWindow):
         # Clear current modules
         self.modules = {}
         self.module_order = []
+
+        # Flag so loading_complete hooks run sync afterwards
+        self._pending_sync = True
 
         # Show loading screen
         self.central_widget.setCurrentWidget(self.loading_widget)
@@ -497,6 +610,9 @@ class GitFileReaderApp(QMainWindow):
         self.loading_complete = True
         self.main_menu.show()
         self.show_main_menu()
+        if getattr(self, '_pending_sync', False):
+            self._pending_sync = False
+            self.sync_downloaded_repos()
 
     def parse_module_info(self, parent_module_path):
         """Parse ModuleInfo.txt files from downloaded submodules"""

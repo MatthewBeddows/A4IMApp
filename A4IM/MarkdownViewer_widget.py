@@ -15,6 +15,34 @@ import webbrowser
 
 SCRIPT_EXTENSIONS = {'.py', '.sh', '.js', '.r', '.rb'}
 
+
+def find_repo_root(file_path):
+    """Walk up from file_path until a .git directory is found (= repo root).
+    Falls back to the file's own directory if no .git is found."""
+    directory = os.path.dirname(os.path.abspath(file_path))
+    while True:
+        if os.path.exists(os.path.join(directory, '.git')):
+            return directory
+        parent = os.path.dirname(directory)
+        if parent == directory:
+            return os.path.dirname(os.path.abspath(file_path))
+        directory = parent
+
+
+def fix_root_relative_paths(html_content, file_path):
+    """Replace root-relative image/link paths (starting with /) with
+    absolute file:// URLs resolved from the repo root."""
+    repo_root = find_repo_root(file_path)
+
+    def replace(match):
+        attr = match.group(1)   # 'src' or 'href'
+        path = match.group(2)   # e.g. /src/lib/img/foo.jpg
+        abs_path = os.path.normpath(os.path.join(repo_root, path.lstrip('/\\')))
+        file_url = QUrl.fromLocalFile(abs_path).toString()
+        return f'{attr}="{file_url}"'
+
+    return re.sub(r'\b(src|href)="(/[^"]*)"', replace, html_content)
+
 RUNNERS = {
     '.py': [sys.executable],
     '.sh': ['bash'],
@@ -126,6 +154,9 @@ class MarkdownViewerWidget(QWidget):
                 '<img style="max-width:100%;height:auto;" ',
                 html_content
             )
+
+            # Resolve root-relative paths (e.g. /src/lib/img/foo.jpg)
+            html_content = fix_root_relative_paths(html_content, self.file_path)
 
             styled_html = f"""
             <html>

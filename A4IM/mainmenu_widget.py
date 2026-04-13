@@ -1,4 +1,4 @@
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QPushButton, QLabel, QFrame, QMessageBox
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QFrame, QMessageBox, QScrollArea
 from PyQt5.QtCore import Qt, QUrl, QThread, pyqtSignal
 from PyQt5.QtGui import QFont, QColor, QPalette, QPixmap
 import os
@@ -47,9 +47,9 @@ class MainMenuWidget(QWidget):
         self.setup_ui()
 
     def setup_ui(self):
-        layout = QVBoxLayout()
-        layout.setSpacing(20)
-        layout.setContentsMargins(50, 50, 50, 50)
+        root_layout = QVBoxLayout()
+        root_layout.setSpacing(0)
+        root_layout.setContentsMargins(0, 0, 0, 0)
 
         # Set flat white background
         self.setAutoFillBackground(True)
@@ -57,57 +57,161 @@ class MainMenuWidget(QWidget):
         palette.setColor(QPalette.Window, QColor('white'))
         self.setPalette(palette)
 
-        # Title Image
+        # ── Top bar: logo ──────────────────────────────────────────────────
+        top_bar = QWidget()
+        top_bar.setStyleSheet("background-color: white;")
+        top_bar_layout = QVBoxLayout(top_bar)
+        top_bar_layout.setContentsMargins(40, 30, 40, 20)
+
         title_image = QLabel()
-        # Build absolute path to logo file (it's in A4IM/images/)
         current_dir = os.path.dirname(os.path.abspath(__file__))
         logo_path = os.path.join(current_dir, "images", "A4IM Logo_pink.png")
         pixmap = QPixmap(logo_path)
-        if pixmap.isNull():
-            print(f"Warning: Could not load logo from {logo_path}")
         scaled_pixmap = pixmap.scaled(300, 100, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         title_image.setPixmap(scaled_pixmap)
         title_image.setAlignment(Qt.AlignCenter)
-        layout.addWidget(title_image)
+        top_bar_layout.addWidget(title_image)
 
-        # Slim grey line
         line = QFrame()
         line.setFrameShape(QFrame.HLine)
         line.setFrameShadow(QFrame.Plain)
-        line.setStyleSheet("""
-            QFrame {
-                border: none;
-                background-color: #d9d9d9;
+        line.setStyleSheet("background-color: #d9d9d9; border: none;")
+        line.setFixedHeight(1)
+        top_bar_layout.addWidget(line)
+
+        root_layout.addWidget(top_bar)
+
+        # ── Body: info panel (left) + buttons (right) ──────────────────────
+        body = QWidget()
+        body_layout_h = QHBoxLayout(body)
+        body_layout_h.setContentsMargins(40, 30, 40, 30)
+        body_layout_h.setSpacing(40)
+
+        # Left: project info
+        info_widget = QWidget()
+        info_widget.setStyleSheet("""
+            QWidget {
+                background-color: #f8f8f8;
+                border-radius: 8px;
             }
         """)
-        line.setFixedHeight(1)
-        layout.addWidget(line)
+        info_layout = QVBoxLayout(info_widget)
+        info_layout.setContentsMargins(20, 20, 20, 20)
+        info_layout.setSpacing(12)
 
-        layout.addSpacing(50)  # Adjust this value to move buttons further down or up
+        self.proj_name_label = QLabel("Loading...")
+        self.proj_name_label.setFont(QFont('Arial', 18, QFont.Bold))
+        self.proj_name_label.setStyleSheet("color: #465775; background: transparent;")
+        self.proj_name_label.setWordWrap(True)
+        info_layout.addWidget(self.proj_name_label)
 
-        # Buttons
+        sep = QFrame()
+        sep.setFrameShape(QFrame.HLine)
+        sep.setStyleSheet("background-color: #d9d9d9; border: none;")
+        sep.setFixedHeight(1)
+        info_layout.addWidget(sep)
+
+        self.proj_desc_label = QLabel("")
+        self.proj_desc_label.setFont(QFont('Arial', 12))
+        self.proj_desc_label.setStyleSheet("color: #555; background: transparent;")
+        self.proj_desc_label.setWordWrap(True)
+        self.proj_desc_label.setAlignment(Qt.AlignTop)
+        info_layout.addWidget(self.proj_desc_label)
+
+        info_layout.addStretch()
+        body_layout_h.addWidget(info_widget, 2)
+
+        # Right: buttons
+        btn_widget = QWidget()
+        btn_layout = QVBoxLayout(btn_widget)
+        btn_layout.setContentsMargins(0, 0, 0, 0)
+        btn_layout.setSpacing(15)
+        btn_layout.setAlignment(Qt.AlignCenter)
+
         buttons = []
-        
-        # Only add Project Overview button if architect module has documentation
         if self.check_architect_documentation():
             buttons.append(("Project Overview", self.show_project_overview))
-        
         buttons.extend([
             ("System View", self.parent.show_system_view),
             ("Refresh Hierarchy", self.parent.refresh_hierarchy),
             ("Exit", self.parent.close)
         ])
 
-        button_layout = QVBoxLayout()
-        button_layout.setAlignment(Qt.AlignCenter)
-        for text, callback in buttons:
-            button = self.create_menu_button(text)
-            button.clicked.connect(callback)
-            button_layout.addWidget(button)
+        # About button — shown only if root repo has a README
+        self.about_button = self.create_menu_button("About")
+        self.about_button.clicked.connect(self.open_about)
+        self.about_button.hide()
+        btn_layout.addWidget(self.about_button)
 
-        layout.addLayout(button_layout)
-        layout.addStretch()
-        self.setLayout(layout)
+        for text, callback in buttons:
+            btn = self.create_menu_button(text)
+            btn.clicked.connect(callback)
+            btn_layout.addWidget(btn)
+
+        btn_layout.addStretch()
+        body_layout_h.addWidget(btn_widget, 1)
+
+        root_layout.addWidget(body, 1)
+        self.setLayout(root_layout)
+
+    def refresh_project_info(self):
+        """Update the project name and description once modules are loaded."""
+        name, desc = self._get_project_info()
+        self.proj_name_label.setText(name)
+        self.proj_desc_label.setText(desc if desc else "No description available.")
+        self.about_button.setVisible(self.find_root_readme() is not None)
+
+    def find_root_readme(self):
+        """Return path to README.md at the root repo, or None."""
+        try:
+            repo_dir = os.path.join("Downloaded Repositories", self.parent.repo_folder)
+            repo_name = self.parent.initial_repo_url.rstrip('/').split('/')[-1].replace('.git', '')
+            module_dir = os.path.join(repo_dir, repo_name)
+            if not os.path.exists(module_dir):
+                return None
+            for fname in os.listdir(module_dir):
+                if fname.lower() == 'readme.md':
+                    return os.path.join(module_dir, fname)
+        except Exception:
+            pass
+        return None
+
+    def open_about(self):
+        """Open the root repo README in the markdown viewer."""
+        readme = self.find_root_readme()
+        if not readme:
+            QMessageBox.information(self, "About", "No README found for this project.")
+            return
+        try:
+            from MarkdownViewer_widget import MarkdownViewerWidget
+            viewer = MarkdownViewerWidget(None, readme)
+            viewer.setWindowTitle("About")
+            viewer.resize(900, 700)
+            viewer.setAttribute(Qt.WA_DeleteOnClose, True)
+            viewer.show()
+            viewer.raise_()
+            if not hasattr(self, '_about_viewers'):
+                self._about_viewers = []
+            self._about_viewers.append(viewer)
+            viewer.destroyed.connect(
+                lambda: self._about_viewers.remove(viewer) if viewer in self._about_viewers else None
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open README:\n{e}")
+
+    def _get_project_info(self):
+        """Return (name, description) for the root module."""
+        try:
+            modules = getattr(self.parent, 'modules', {})
+            if not modules:
+                return "Project", ""
+            first_key = next(iter(modules))
+            data = modules[first_key]
+            name = re.sub(r'\[.*?\]', '', first_key).strip()
+            description = re.sub(r'\[.*?\]', '', data.get('description', '')).strip()
+            return name, description
+        except Exception:
+            return "Project", ""
 
     def create_menu_button(self, text):
         button = QPushButton(text)

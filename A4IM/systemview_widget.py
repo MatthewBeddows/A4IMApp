@@ -132,8 +132,8 @@ class NodeItem(QGraphicsRectItem):
     def __init__(self, name, data, system_view, node_type='module'):
         # Adjust size based on node depth (more nested modules will be smaller)
         depth = data.get('depth', 0)
-        width = max(150 - depth * 10, 80)  # Minimum width of 80
-        height = max(80 - depth * 5, 50)   # Minimum height of 50
+        width = max(220 - depth * 10, 140)  # Minimum width of 140
+        height = max(110 - depth * 5, 75)   # Minimum height of 75
 
         # Initialize the rectangle centered at (0,0)
         super().__init__(-width/2, -height/2, width, height)
@@ -321,6 +321,7 @@ class SystemView(QWidget):
         self.download_manager = DownloadManager(self)
         self.browser_thread = None  # Keep reference to browser thread
         self.folder_thread = None  # Keep reference to folder thread
+        self.layout_orientation = 'horizontal'
         self.setup_ui()
 
 
@@ -385,6 +386,14 @@ class SystemView(QWidget):
         open_folder_button.setToolTip("Open the project folder in file explorer")
         open_folder_button.setFixedSize(100, 30)
         button_layout.addWidget(open_folder_button)
+
+        # Flip Layout button
+        self.flip_layout_button = QPushButton("⇄ Flip Layout")
+        self.flip_layout_button.setStyleSheet(self.get_button_style())
+        self.flip_layout_button.clicked.connect(self.toggle_orientation)
+        self.flip_layout_button.setToolTip("Toggle between horizontal and vertical graph layout")
+        self.flip_layout_button.setFixedSize(110, 30)
+        button_layout.addWidget(self.flip_layout_button)
 
         # Toggle All button
         self.toggle_button = QPushButton("Toggle All")
@@ -585,7 +594,7 @@ class SystemView(QWidget):
 
 
         # Add left and right layouts to main layout
-        layout.addLayout(left_layout, 2)
+        layout.addLayout(left_layout, 3)
         layout.addLayout(right_layout, 1)
 
         self.setLayout(layout)
@@ -649,6 +658,9 @@ class SystemView(QWidget):
         items_rect.adjust(-extra_space, -extra_space, extra_space, extra_space)
         self.graphics_scene.setSceneRect(items_rect)
 
+        # Auto-fit view to show all content, centered and zoomed out
+        self.recenter_view()
+
 
     # Initialize nodes recursively
     def initialize_nodes(self):
@@ -658,35 +670,58 @@ class SystemView(QWidget):
 
     # Layout modules recursively
     def layout_modules(self, modules, parent_node, depth, x, y):
-        spacing_x = 200
-        spacing_y = 150
-        total_height = 0
-        positions = []
-        # First, calculate the total height needed
-        for module_name in modules:
-            child_modules = modules[module_name].get('submodules', {})
-            num_children = len(child_modules)
-            height = max((num_children * spacing_y), spacing_y)
-            total_height += height
-            positions.append((module_name, height))
+        if self.layout_orientation == 'horizontal':
+            # Parent left, children spread to the right
+            spacing_depth = 280
+            spacing_sibling = 160
 
-        # Start positioning child modules
-        current_y = y - total_height / 2
-        for module_name, height in positions:
-            module_data = modules[module_name]
-            module_data['depth'] = depth  # Store depth for styling purposes
-            
-            # Load additional data from ModuleInfo.txt
-            self.load_module_data_from_file(module_data)
-            
-            position = QPointF(x + spacing_x, current_y + height / 2)
-            module_node = self.add_node(module_name, module_data, position, parent_node, depth)
-            self.all_nodes.append(module_node)
-            # Recurse into child modules
-            child_modules = module_data.get('submodules', {})
-            if child_modules:
-                self.layout_modules(child_modules, module_node, depth + 1, x + spacing_x, position.y())
-            current_y += height
+            total_height = 0
+            positions = []
+            for module_name in modules:
+                child_modules = modules[module_name].get('submodules', {})
+                num_children = len(child_modules)
+                height = max((num_children * spacing_sibling), spacing_sibling)
+                total_height += height
+                positions.append((module_name, height))
+
+            current_y = y - total_height / 2
+            for module_name, height in positions:
+                module_data = modules[module_name]
+                module_data['depth'] = depth
+                self.load_module_data_from_file(module_data)
+                position = QPointF(x + spacing_depth, current_y + height / 2)
+                module_node = self.add_node(module_name, module_data, position, parent_node, depth)
+                self.all_nodes.append(module_node)
+                child_modules = module_data.get('submodules', {})
+                if child_modules:
+                    self.layout_modules(child_modules, module_node, depth + 1, x + spacing_depth, position.y())
+                current_y += height
+        else:
+            # Parent top, children spread downward
+            spacing_depth = 200
+            spacing_sibling = 280
+
+            total_width = 0
+            positions = []
+            for module_name in modules:
+                child_modules = modules[module_name].get('submodules', {})
+                num_children = len(child_modules)
+                width = max((num_children * spacing_sibling), spacing_sibling)
+                total_width += width
+                positions.append((module_name, width))
+
+            current_x = x - total_width / 2
+            for module_name, width in positions:
+                module_data = modules[module_name]
+                module_data['depth'] = depth
+                self.load_module_data_from_file(module_data)
+                position = QPointF(current_x + width / 2, y + spacing_depth)
+                module_node = self.add_node(module_name, module_data, position, parent_node, depth)
+                self.all_nodes.append(module_node)
+                child_modules = module_data.get('submodules', {})
+                if child_modules:
+                    self.layout_modules(child_modules, module_node, depth + 1, position.x(), y + spacing_depth)
+                current_x += width
 
     # Add a node (project or module)
     def add_node(self, name, data, position, parent_node, depth):
@@ -1153,7 +1188,9 @@ class SystemView(QWidget):
 
         # Documents — build list from available docs
         self.docs_list.clear()
+        readme_path = self.check_for_readme(data)
         doc_entries = [
+            (readme_path is not None,                                          "README",           "readme"),
             (self.has_csv_in_children(node, self.check_for_bom_file),        "Module BOM",       "bom"),
             (self.has_csv_in_children(node, self.check_risk_assessment_file), "Risk Assessment",  "risk"),
             (self.has_csv_in_children(node, self.check_for_failure_mode_csv), "Failure Mode",     "failure"),
@@ -1166,6 +1203,8 @@ class SystemView(QWidget):
             if available:
                 item = QListWidgetItem(label)
                 item.setData(Qt.UserRole, key)
+                if key == "readme":
+                    item.setData(Qt.UserRole + 1, readme_path)
                 self.docs_list.addItem(item)
         has_any_docs = self.docs_list.count() > 0
         self.docs_section_label.setVisible(has_any_docs)
@@ -1176,6 +1215,9 @@ class SystemView(QWidget):
             
     def _docs_item_clicked(self, item):
         key = item.data(Qt.UserRole)
+        if key == "readme":
+            self.open_readme(item.data(Qt.UserRole + 1))
+            return
         actions = {
             "bom":       self.view_module_bom,
             "risk":      self.open_risk_assessment,
@@ -1343,22 +1385,17 @@ class SystemView(QWidget):
             else:
                 csv_viewer = CSVViewerWidget(self.parent, csv_path)
 
-            # Add to parent's central widget if it exists
-            if hasattr(self.parent, 'central_widget'):
-                # First, check if a CSV viewer is already in the central widget
-                for i in range(self.parent.central_widget.count()):
-                    widget = self.parent.central_widget.widget(i)
-                    if isinstance(widget, (CSVViewerWidget, BOMViewerWidget, RiskAssessmentViewerWidget)):
-                        # Remove the existing CSV viewer
-                        self.parent.central_widget.removeWidget(widget)
-                        widget.deleteLater()
+            # Show as a standalone pop-out window
+            csv_viewer.setWindowFlag(Qt.Window, True)
+            csv_viewer.setAttribute(Qt.WA_DeleteOnClose, True)
+            csv_viewer.show()
+            csv_viewer.raise_()
 
-                # Add the new CSV viewer
-                self.parent.central_widget.addWidget(csv_viewer)
-                self.parent.central_widget.setCurrentWidget(csv_viewer)
-            else:
-                # If no central widget, just show it as a separate window
-                csv_viewer.show()
+            # Keep a reference so it isn't garbage collected
+            if not hasattr(self, '_open_viewers'):
+                self._open_viewers = []
+            self._open_viewers.append(csv_viewer)
+            csv_viewer.destroyed.connect(lambda: self._open_viewers.remove(csv_viewer) if csv_viewer in self._open_viewers else None)
             
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to open CSV viewer: {str(e)}")
@@ -1438,27 +1475,21 @@ class SystemView(QWidget):
         self.show_markdown_selection_widget(md_files, doc_folder)
 
     def show_markdown_selection_widget(self, md_files, doc_folder):
-        """Show markdown file selection widget embedded in the main application"""
+        """Show markdown file selection as a standalone pop-out window"""
         from MarkdownSelection_widget import MarkdownSelectionWidget
 
-        # Create the markdown selection widget
         md_selection = MarkdownSelectionWidget(self.parent, md_files, doc_folder)
+        md_selection.setWindowFlag(Qt.Window, True)
+        md_selection.setAttribute(Qt.WA_DeleteOnClose, True)
+        md_selection.setWindowTitle("Documentation Viewer")
+        md_selection.resize(900, 700)
+        md_selection.show()
+        md_selection.raise_()
 
-        # Add to parent's central widget if it exists
-        if hasattr(self.parent, 'central_widget'):
-            # Remove any existing markdown selection widget
-            for i in range(self.parent.central_widget.count()):
-                if isinstance(self.parent.central_widget.widget(i), MarkdownSelectionWidget):
-                    existing_widget = self.parent.central_widget.widget(i)
-                    self.parent.central_widget.removeWidget(existing_widget)
-                    existing_widget.deleteLater()
-
-            # Add the new markdown selection widget
-            self.parent.central_widget.addWidget(md_selection)
-            self.parent.central_widget.setCurrentWidget(md_selection)
-        else:
-            # If no central widget, just show it as a separate window
-            md_selection.show()
+        if not hasattr(self, '_open_viewers'):
+            self._open_viewers = []
+        self._open_viewers.append(md_selection)
+        md_selection.destroyed.connect(lambda: self._open_viewers.remove(md_selection) if md_selection in self._open_viewers else None)
 
     def check_module_documentation(self, module_data):
         """Check if a module has markdown files in src/doc folder"""
@@ -1489,10 +1520,67 @@ class SystemView(QWidget):
 
         return None
                 
+    def check_for_readme(self, module_data):
+        """Return path to README.md at the repo root, or None if not found."""
+        if not module_data or not isinstance(module_data, dict):
+            return None
+        repo_info = module_data.get('repository', {})
+        if not repo_info or not repo_info.get('name'):
+            return None
+        repo_dir = os.path.join("Downloaded Repositories", self.parent.repo_folder)
+        module_dir = os.path.join(repo_dir, repo_info['name'])
+        if not os.path.exists(module_dir):
+            return None
+        for name in os.listdir(module_dir):
+            if name.lower() == 'readme.md':
+                return os.path.join(module_dir, name)
+        return None
+
+    def open_readme(self, readme_path):
+        """Open a README.md in the markdown viewer pop-out."""
+        if not readme_path or not os.path.exists(readme_path):
+            QMessageBox.warning(self, "Not Found", "README file could not be found.")
+            return
+        try:
+            from MarkdownViewer_widget import MarkdownViewerWidget
+            viewer = MarkdownViewerWidget(self.parent, readme_path)
+            viewer.setWindowFlag(Qt.Window, True)
+            viewer.setAttribute(Qt.WA_DeleteOnClose, True)
+            viewer.setWindowTitle("README")
+            viewer.resize(900, 700)
+            viewer.show()
+            viewer.raise_()
+            if not hasattr(self, '_open_viewers'):
+                self._open_viewers = []
+            self._open_viewers.append(viewer)
+            viewer.destroyed.connect(
+                lambda: self._open_viewers.remove(viewer) if viewer in self._open_viewers else None
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open README: {e}")
+
     # Recenter the graphics view
     def recenter_view(self):
         self.graphics_view.resetTransform()
-        self.graphics_view.centerOn(0, 0)
+        items_rect = self.graphics_scene.itemsBoundingRect()
+        if not items_rect.isNull():
+            padded = items_rect.adjusted(-80, -80, 80, 80)
+            self.graphics_view.fitInView(padded, Qt.KeepAspectRatio)
+            # Zoom out a little more so graph isn't edge-to-edge
+            self.graphics_view.scale(0.85, 0.85)
+        else:
+            self.graphics_view.centerOn(0, 0)
+
+    def toggle_orientation(self):
+        if self.layout_orientation == 'horizontal':
+            self.layout_orientation = 'vertical'
+            self.flip_layout_button.setText("↕ Flip Layout")
+        else:
+            self.layout_orientation = 'horizontal'
+            self.flip_layout_button.setText("⇄ Flip Layout")
+        # Re-populate the graph with the new orientation
+        self.populate_modules(self.modules_data, self.project_name)
+        self.recenter_view()
 
     # Toggle modules visibility
     def toggle_modules(self):
@@ -2362,11 +2450,12 @@ class SystemView(QWidget):
             node.is_downloaded = True
             node.download_indicator.setPlainText("✓")
             node.download_indicator.setDefaultTextColor(QColor("#32CD32"))
-            
-            # Hide download button
-            self.download_module_button.hide()
-            
+
             QMessageBox.information(self, "Success", f"Downloaded {repo_name}")
+
+            # Refresh right panel so documents/buttons update immediately
+            if self.selected_node is node:
+                self.node_clicked(node)
         else:
             QMessageBox.critical(self, "Error", f"Failed to download: {message}")
 
