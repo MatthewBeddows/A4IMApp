@@ -2391,12 +2391,29 @@ class SystemView(QWidget):
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             output_path = os.path.join(var_dir, f"{stem}_{timestamp}.txt")
 
+            # Build environment — expose bundled avrdude to scripts
+            env = os.environ.copy()
+            tools_base = os.path.dirname(os.path.abspath(__file__))
+            if getattr(sys, 'frozen', False):
+                avrdude_dir = sys._MEIPASS
+                avrdude_name = 'avrdude.exe' if sys.platform.startswith('win') else 'avrdude'
+                env['A4IM_AVRDUDE'] = os.path.join(avrdude_dir, avrdude_name)
+                env['A4IM_AVRDUDE_CONF'] = os.path.join(avrdude_dir, 'avrdude.conf')
+            else:
+                if sys.platform.startswith('win'):
+                    env['A4IM_AVRDUDE'] = os.path.join(tools_base, 'tools', 'avrdude', 'windows', 'avrdude.exe')
+                    env['A4IM_AVRDUDE_CONF'] = os.path.join(tools_base, 'tools', 'avrdude', 'windows', 'avrdude.conf')
+                else:
+                    env['A4IM_AVRDUDE'] = os.path.join(tools_base, 'tools', 'avrdude', 'linux', 'avrdude_Linux_64bit', 'bin', 'avrdude')
+                    env['A4IM_AVRDUDE_CONF'] = os.path.join(tools_base, 'tools', 'avrdude', 'linux', 'avrdude_Linux_64bit', 'etc', 'avrdude.conf')
+
             # Run the script, capturing stdout and stderr
             result = subprocess.run(
                 [sys.executable, file_path],
                 capture_output=True,
                 text=True,
-                cwd=module_root
+                cwd=module_root,
+                env=env
             )
 
             # Write captured output to the log file

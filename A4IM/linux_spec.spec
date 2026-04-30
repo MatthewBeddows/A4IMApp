@@ -13,6 +13,17 @@ binaries.extend(qt_collection[1])
 hiddenimports.extend(qt_collection[2])
 hiddenimports.extend(['git.cmd', 'git.refs', 'git.objects', 'git.repo', 'requests'])
 
+# pyserial
+serial_collection = collect_all('serial')
+datas.extend(serial_collection[0])
+binaries.extend(serial_collection[1])
+hiddenimports.extend(serial_collection[2])
+hiddenimports.extend(['serial', 'serial.tools', 'serial.tools.list_ports'])
+
+# avrdude (Linux)
+binaries.append(('tools/avrdude/linux/avrdude_Linux_64bit/bin/avrdude', '.'))
+datas.append(('tools/avrdude/linux/avrdude_Linux_64bit/etc/avrdude.conf', '.'))
+
 a = Analysis(['main.py'],
     pathex=[],
     binaries=binaries,

@@ -32,6 +32,35 @@ SCRIPT_ICONS = {
 }
 
 
+def _extract_script_error(output):
+    """Return a short, human-readable error summary from script output."""
+    low = output.lower()
+    if 'permission denied' in low:
+        return ("Serial port permission denied.\n"
+                "Run the 'Setup Flash Permissions' script from the Firmware doc, "
+                "then unplug and replug the board.")
+    if 'no boards detected' in low or 'no arduino' in low:
+        return ("No Arduino board was detected.\n"
+                "Check the USB connection. On WSL2, run 'usbipd attach' in PowerShell first.")
+    if 'hex file not found' in low or 'firmware file not found' in low:
+        return ("Firmware file (firmware.hex) not found.\n"
+                "Export it from Arduino IDE via Sketch > Export Compiled Binary "
+                "and place it in the scripts/ folder.")
+    if 'board.json not found' in low:
+        return "board.json is missing from the scripts/ folder."
+    if 'timeout' in low or 'not in sync' in low:
+        return ("The board did not respond.\n"
+                "Check that the correct board type, programmer, and baud rate are set in board.json.")
+    if 'no such file or directory' in low:
+        return "A required file was not found. Check the log for details."
+    if output.strip():
+        # Return last non-empty line of output as a hint
+        lines = [l.strip() for l in output.splitlines() if l.strip()]
+        last = lines[-1] if lines else ''
+        return f"The script reported an error.\nLast output: {last}\n\nSee the log file for full details."
+    return "The script exited with an error. See the log file for details."
+
+
 def find_script_links(md_file_path):
     """Parse a markdown file and return list of (label, abs_path) for script links."""
     try:
@@ -296,19 +325,36 @@ class MarkdownSelectionWidget(QWidget):
             QMessageBox.warning(self, "Unsupported", f"No runner configured for {ext} files.")
             return
         try:
-            script_dir = os.path.dirname(file_path)
+            abs_file_path = os.path.abspath(file_path)
+            script_dir = os.path.dirname(abs_file_path)
             var_dir = os.path.join(script_dir, 'var')
             os.makedirs(var_dir, exist_ok=True)
 
-            stem = os.path.splitext(os.path.basename(file_path))[0]
+            stem = os.path.splitext(os.path.basename(abs_file_path))[0]
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             output_path = os.path.join(var_dir, f"{stem}_{timestamp}.txt")
 
+            env = os.environ.copy()
+            tools_base = os.path.dirname(os.path.abspath(__file__))
+            if getattr(sys, 'frozen', False):
+                avrdude_dir = sys._MEIPASS
+                avrdude_name = 'avrdude.exe' if sys.platform.startswith('win') else 'avrdude'
+                env['A4IM_AVRDUDE'] = os.path.join(avrdude_dir, avrdude_name)
+                env['A4IM_AVRDUDE_CONF'] = os.path.join(avrdude_dir, 'avrdude.conf')
+            else:
+                if sys.platform.startswith('win'):
+                    env['A4IM_AVRDUDE'] = os.path.join(tools_base, 'tools', 'avrdude', 'windows', 'avrdude.exe')
+                    env['A4IM_AVRDUDE_CONF'] = os.path.join(tools_base, 'tools', 'avrdude', 'windows', 'avrdude.conf')
+                else:
+                    env['A4IM_AVRDUDE'] = os.path.join(tools_base, 'tools', 'avrdude', 'linux', 'avrdude_Linux_64bit', 'bin', 'avrdude')
+                    env['A4IM_AVRDUDE_CONF'] = os.path.join(tools_base, 'tools', 'avrdude', 'linux', 'avrdude_Linux_64bit', 'etc', 'avrdude.conf')
+
             result = subprocess.run(
-                cmd + [file_path],
+                cmd + [abs_file_path],
                 capture_output=True,
                 text=True,
-                cwd=script_dir
+                cwd=script_dir,
+                env=env
             )
 
             with open(output_path, 'w') as f:
@@ -323,13 +369,29 @@ class MarkdownSelectionWidget(QWidget):
                     f.write("STDERR:\n")
                     f.write(result.stderr)
 
-            status = "Completed" if result.returncode == 0 else "FAILED"
-            QMessageBox.information(
-                self, f"Script {status}",
-                f"{os.path.basename(file_path)} finished (code {result.returncode}).\n\nOutput saved to:\n{output_path}"
-            )
+            combined_output = (result.stdout or '') + (result.stderr or '')
+
+            if result.returncode == 0:
+                QMessageBox.information(
+                    self, "Script Completed",
+                    f"{os.path.basename(abs_file_path)} completed successfully.\n\n"
+                    f"Full log saved to:\n{output_path}"
+                )
+            else:
+                # Extract a user-friendly reason from the output
+                reason = _extract_script_error(combined_output)
+                QMessageBox.warning(
+                    self, "Script Failed",
+                    f"{os.path.basename(abs_file_path)} did not complete successfully.\n\n"
+                    f"{reason}\n\n"
+                    f"Full log saved to:\n{output_path}"
+                )
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to run script:\n{str(e)}")
+            QMessageBox.critical(
+                self, "Script Error",
+                f"Could not run script:\n{str(e)}\n\n"
+                "Check that the script file exists and is a valid Python file."
+            )
 
     def on_item_double_clicked(self, item):
         file_path = os.path.join(self.doc_folder, item.text())

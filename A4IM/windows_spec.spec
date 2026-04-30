@@ -11,6 +11,14 @@ if sys.platform.startswith('win'):
     import _cffi_backend
     binaries.append((_cffi_backend.__file__, '.'))
 
+# pyserial
+serial_collection = collect_all('serial')
+_serial_datas, _serial_binaries, _serial_hiddenimports = serial_collection
+binaries.extend(_serial_binaries)
+
+# avrdude (Windows)
+binaries.append(('tools/avrdude/windows/avrdude.exe', '.'))
+
 a = Analysis(
     ['main.py'],
     pathex=[],
@@ -21,7 +29,9 @@ a = Analysis(
         ('systemview_widget.py', '.'),
         ('download_thread.py', '.'),
         ('gitbuilding_setup.py', '.'),
-        ('ArchitectSelector_widget.py', '.')
+        ('ArchitectSelector_widget.py', '.'),
+        ('tools/avrdude/windows/avrdude.conf', '.'),
+        *_serial_datas,
     ],
     hiddenimports=[
         'PyQt5.sip',
@@ -30,12 +40,16 @@ a = Analysis(
         'soupsieve',
         'cffi',
         '_cffi_backend',
+        'serial',
+        'serial.tools',
+        'serial.tools.list_ports',
         'gitbuilding_widget',
         'mainmenu_widget',
         'systemview_widget',
         'download_thread',
         'gitbuilding_setup',
-        'ArchitectSelector_widget'
+        'ArchitectSelector_widget',
+        *_serial_hiddenimports,
     ],
     hookspath=[],
     hooksconfig={},
