@@ -1,8 +1,8 @@
 [architectName] OSI² ONE
 [url] https://gitlab.com/MatthewBeddows/osi-one-orshards
 
-[architectName] A4IM Project Architect DUMMY
-[url] https://github.com/MatthewBeddows/A4IM-ProjectArchitect
+[architectName] A4IM OSI2 ONE
+[url] https://gitlab.com/osii/mri-scanners/osii-one
 
 [architectName] COSI Architect
 [url] https://github.com/MatthewBeddows/COSI-Architect
