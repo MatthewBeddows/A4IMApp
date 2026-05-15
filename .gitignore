@@ -1,3 +1,22 @@
-/A4IM/__pycache__
-/A4IM/Downloaded Repositories/OSI² ONE
+# Python
+__pycache__/
 *.pyc
+*.pyo
+
+# Windows metadata
+*:Zone.Identifier
+*.Zone.Identifier
+
+# Build output
+dist/
+
+# User data
+Downloaded Repositories/
+custom_repositories.txt
+
+# avrdude binaries (too large for git — downloaded at build time)
+A4IM/tools/avrdude/
+
+# Local dev
+user_manual.tex
+demo-arduino-flash/
