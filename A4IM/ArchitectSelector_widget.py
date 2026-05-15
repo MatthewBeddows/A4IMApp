@@ -54,7 +54,7 @@ class ArchitectSelector(QMainWindow):
             print("Cleared architects dictionary")
             
             # Force fetch the latest version
-            url = "https://raw.githubusercontent.com/MatthewBeddows/ArchitectList/main/architectList.txt"
+            url = "https://github.com/MatthewBeddows/A4IMApp/blob/main/A4IM/architectList.txt"
             headers = {'Cache-Control': 'no-cache', 'Pragma': 'no-cache'}
             response = requests.get(url, headers=headers, verify=True)
             response.raise_for_status()
